@@ -1,0 +1,23 @@
+frontend@0.1.0 /home/igris/projects/genomics-platform/frontend
+├── @emnapi/core@1.9.2 extraneous
+├── @emnapi/runtime@1.9.2 extraneous
+├── @emnapi/wasi-threads@1.2.1 extraneous
+├── @napi-rs/wasm-runtime@0.2.12 extraneous
+├── @tailwindcss/postcss@4.2.2
+├── @tybys/wasm-util@0.10.1 extraneous
+├── @types/node@20.19.39
+├── @types/react-dom@19.2.3
+├── @types/react@19.2.14
+├── eslint-config-next@16.2.3
+├── eslint@9.39.4
+├── framer-motion@12.38.0
+├── leaflet@1.9.4
+├── lucide-react@1.8.0
+├── next-auth@4.24.13
+├── next@16.2.3
+├── react-dom@19.2.4
+├── react-leaflet@5.0.0
+├── react@19.2.4
+├── recharts@3.8.1
+├── tailwindcss@4.2.2
+└── typescript@5.9.3
