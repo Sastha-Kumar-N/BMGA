@@ -1,0 +1,535 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  STUDENT
+  RESEARCHER
+  INDUSTRY
+  OTHER
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      UserRole @default(STUDENT)
+  createdAt DateTime @default(now())
+}
+
+model Organism {
+  id             Int      @id @default(autoincrement())
+  scientificName String   @unique
+  displayName    String?
+  taxonomyId     Int?
+  domain         String?
+  phylum         String?
+  className      String?
+  orderName      String?
+  family         String?
+  genus          String?
+  species        String?
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  strains        Strain[]
+
+  @@index([genus])
+  @@index([species])
+}
+
+model Strain {
+  id                  Int       @id @default(autoincrement())
+  organismId          Int
+  strainName          String
+  isolateName         String?
+  strainCode          String?
+  biosampleAccession  String?
+  bioprojectAccession String?
+  assemblyAccession   String?
+  sourceType          String?
+  host                String?
+  country             String?
+  state               String?
+  city                String?
+  collectionDate      DateTime?
+  locationText        String?
+  latitude            Float?
+  longitude           Float?
+  genomeStatus        String?
+  genomeSize          Int?
+  gcContent           Decimal?  @db.Decimal(5, 2)
+  repoLink            String?
+  metadata            Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  organism        Organism         @relation(fields: [organismId], references: [id], onDelete: Cascade)
+  assemblies      Assembly[]
+  qcReports       QcReport[]
+  annotationRuns  AnnotationRun[]
+  genomicFeatures GenomicFeature[]
+  fileAssets      FileAsset[]
+  amrGenes        AmrGene[]
+  analysisRuns    AnalysisRun[]
+
+  @@index([organismId])
+  @@index([strainName])
+  @@index([assemblyAccession])
+  @@index([country])
+  @@index([state])
+  @@index([city])
+}
+
+model Assembly {
+  id              Int      @id @default(autoincrement())
+  strainId        Int
+  assemblyName    String?
+  assemblyVersion String?
+  assembler       String?
+  assemblyLevel   String?
+  contigCount     Int?
+  scaffoldCount   Int?
+  n50             Int?
+  l50             Int?
+  longestContig   Int?
+  totalLength     Int?
+  gapCount        Int?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  strain     Strain      @relation(fields: [strainId], references: [id], onDelete: Cascade)
+  fileAssets FileAsset[]
+
+  @@index([strainId])
+}
+
+model QcReport {
+  id                             Int      @id @default(autoincrement())
+  strainId                       Int
+  qcTool                         String
+  reportType                     String?
+  perBaseQualityStatus           String?
+  perSequenceQualityStatus       String?
+  adapterContentStatus           String?
+  duplicationStatus              String?
+  overrepresentedSequencesStatus String?
+  percentGc                      Decimal? @db.Decimal(5, 2)
+  totalSequences                 Int?
+  summary                        Json?
+  createdAt                      DateTime @default(now())
+
+  strain Strain @relation(fields: [strainId], references: [id], onDelete: Cascade)
+
+  @@index([strainId])
+  @@index([qcTool])
+}
+
+model AnnotationRun {
+  id              Int      @id @default(autoincrement())
+  strainId        Int
+  toolName        String
+  toolVersion     String?
+  cdsCount        Int?
+  trnaCount       Int?
+  rrnaCount       Int?
+  ncrnaCount      Int?
+  pseudogeneCount Int?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  strain          Strain           @relation(fields: [strainId], references: [id], onDelete: Cascade)
+  genomicFeatures GenomicFeature[]
+  fileAssets      FileAsset[]
+
+  @@index([strainId])
+  @@index([toolName])
+}
+
+model GenomicFeature {
+  id              Int            @id @default(autoincrement())
+  strainId        Int
+  annotationRunId Int?
+  seqid           String?
+  locusTag        String?
+  geneName        String?
+  featureType     String
+  startPos        Int
+  endPos          Int
+  strand          String?
+  product         String?
+  proteinId       String?
+  geneBiotype     String?
+  attributes      Json?
+  createdAt       DateTime       @default(now())
+
+  strain        Strain         @relation(fields: [strainId], references: [id], onDelete: Cascade)
+  annotationRun AnnotationRun? @relation(fields: [annotationRunId], references: [id], onDelete: SetNull)
+
+  @@index([strainId])
+  @@index([geneName])
+  @@index([locusTag])
+  @@index([featureType])
+}
+
+model FileAsset {
+  id              Int          @id @default(autoincrement())
+  strainId        Int?
+  assemblyId      Int?
+  annotationRunId Int?
+  analysisRunId   Int?
+  fileType        String
+  fileName        String
+  bucketName      String
+  objectKey       String
+  contentType     String?
+  fileSizeBytes   Int?
+  checksumSha256  String?
+  isPublic        Boolean      @default(false)
+  metadata        Json?
+  createdAt       DateTime     @default(now())
+
+  strain        Strain?        @relation(fields: [strainId], references: [id], onDelete: Cascade)
+  assembly      Assembly?      @relation(fields: [assemblyId], references: [id], onDelete: Cascade)
+  annotationRun AnnotationRun? @relation(fields: [annotationRunId], references: [id], onDelete: Cascade)
+  analysisRun   AnalysisRun?   @relation("AnalysisRunOutputFiles", fields: [analysisRunId], references: [id], onDelete: Cascade)
+
+  inputToRuns AnalysisRun[] @relation("AnalysisRunInputFile")
+  toolResults ToolResult[]
+
+  @@index([fileType])
+}
+
+model AnalysisRun {
+  id              Int                 @id @default(autoincrement())
+  strainId        Int
+  sampleName      String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  strain          Strain              @relation(fields: [strainId], references: [id], onDelete: Cascade)
+  inputFileId     Int?
+  inputFile       FileAsset?          @relation("AnalysisRunInputFile", fields: [inputFileId], references: [id], onDelete: SetNull)
+  outputFiles     FileAsset[]         @relation("AnalysisRunOutputFiles")
+  toolResults     ToolResult[]
+
+  fastqc          FastqcResult?
+  fastp           FastpResult?
+  multiqc         MultiqcResult?
+  spades          SpadesResult?
+  quast           QuastResult?
+  busco           BuscoResult?
+  checkm          CheckmResult?
+  prokka          ProkkaResult?
+  diamond         DiamondResult?
+  kofamkoala      KofamkoalaResult?
+  abricate        AbricateResult?
+  mlst            MlstResult?
+  islandPath      IslandPathResult?
+  trnascan        TrnascanSeResult?
+  hmmer           HmmerResult?
+  minced          MincedResult?
+  jellyfish       JellyfishResult?
+  trf             TrfResult?
+  barrnap         BarrnapResult?
+  antismash       AntismashResult?
+
+  @@index([strainId])
+}
+
+model FastqcResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  totalReads           Int?
+  gcContent            Float?
+  q30Rate              Float?
+  duplicationRate      Float?
+  sequenceLengthMinBp  Int?
+  sequenceLengthMaxBp  Int?
+  adapterContentStatus String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model FastpResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  readsBeforeFiltering Int?
+  readsAfterFiltering  Int?
+  q20Rate              Float?
+  q30Rate              Float?
+  duplicationRate      Float?
+  insertSizePeakBp     Int?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model MultiqcResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  samplesAnalysed      Int?
+  avgSequenceLengthBp  Int?
+  gcContent            Float?
+  duplicatesR1         Float?
+  duplicatesR2         Float?
+  failedModules        Int?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model SpadesResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  totalContigs         Int?
+  largestContigKb      Float?
+  n50Kb                Float?
+  totalLengthMb        Float?
+  coverageX            Float?
+  peakMemoryGb         Float?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model QuastResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  n50Kb                Float?
+  l50                  Int?
+  genomeFraction       Float?
+  mismatchesPer100Kb   Float?
+  largestContigKb      Float?
+  duplicationRatio     Float?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model BuscoResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  completePercent      Float?
+  singleCopyPercent    Float?
+  duplicatedPercent    Float?
+  fragmentedPercent    Float?
+  missingPercent       Float?
+  lineage              String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model CheckmResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  completeness         Float?
+  contamination        Float?
+  strainHeterogeneity  Float?
+  qualityScore         Float?
+  markerGenes          Int?
+  lineage              String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model ProkkaResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  cdsCount             Int?
+  rrnaGenes            Int?
+  trnaGenes            Int?
+  hypotheticalProteins Int?
+  codingDensity        Float?
+  pseudogenes          Int?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model DiamondResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  queriesAligned       Int?
+  percentAligned       Float?
+  databaseName         String?
+  avgIdentity          Float?
+  evalueCutoff         String?
+  unalignedQueries     Int?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model KofamkoalaResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  genesAnnotated       Int?
+  keggPathways         Int?
+  koCoverage           Float?
+  avgHmmScore          Float?
+  dbRelease            String?
+  topPathway           String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model AbricateResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  genesFound           Int?
+  minCoverage          Float?
+  minIdentity          Float?
+  topHit               String?
+  virulenceGenes       Int?
+  plasmidGenes         Int?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model MlstResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  scheme               String?
+  sequenceType         String?
+  allelesMatched       String?
+  confidence           Float?
+  clonalComplex        String?
+  pandemicLineage      Boolean?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model IslandPathResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  gisDetected          Int?
+  totalGiLengthKb      Float?
+  avgGiLengthKb        Float?
+  giLinkedGenes        Int?
+  amrIsland            Boolean?
+  amrIslandName        String?
+  amrGene              String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model TrnascanSeResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  trnasFound           Int?
+  aminoAcidTypes       Int?
+  pseudoTrnas          Int?
+  anticodons           Int?
+  hotspots             Int?
+  modelType            String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model HmmerResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  domainsFound         Int?
+  pfamHits             Int?
+  tigrfamHits          Int?
+  avgEvalue            String?
+  databases            String?
+  novelDomains         Int?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model MincedResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  crisprArrays         Int?
+  totalSpacers         Int?
+  repeatLengthBp       Int?
+  spacerLengthBp       Int?
+  phageMatches         Int?
+  arraysOnContigs      String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model JellyfishResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  kmerSize             Int?
+  distinctKmersMillion Float?
+  totalKmersBillion    Float?
+  peakFrequencyX       Float?
+  genomeSizeMb         Float?
+  repeatContent        Float?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model TrfResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  tandemRepeats        Int?
+  totalLengthKb        Float?
+  genomeFraction       Float?
+  avgPeriodSizeBp      Int?
+  maxCopy              Float?
+  phaseVariationLoci   Int?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model BarrnapResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  rrna16S              Int?
+  rrna23S              Int?
+  rrna5S               Int?
+  totalRrna            Int?
+  evalueCutoff         String?
+  taxonomy             String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model AntismashResult {
+  id                   Int          @id @default(autoincrement())
+  analysisRunId        Int          @unique
+  bgcRegions           Int?
+  bgcTypes             String?
+  mibigMatches         Int?
+  novelBgcs            Int?
+  mibigHit             String?
+  databaseName         String?
+
+  analysisRun          AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+}
+
+model AmrGene {
+id              Int      @id @default(autoincrement())
+  strainId        Int
+  geneSymbol      String
+  drugClass       String?
+  identity        Float?
+  createdAt       DateTime @default(now()) // Add this line!
+
+  strain          Strain   @relation(fields: [strainId], references: [id], onDelete: Cascade)
+}
+
+model ToolResult {
+  id             Int          @id @default(autoincrement())
+  analysisRunId  Int
+  resultType     String
+  title          String?
+  description    String?
+  format         String?
+  fileAssetId    Int?
+  jsonData       Json?
+  textData       String?
+  createdAt      DateTime     @default(now())
+
+  analysisRun    AnalysisRun  @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+  fileAsset      FileAsset?   @relation(fields: [fileAssetId], references: [id], onDelete: SetNull)
+
+  @@index([analysisRunId])
+  @@index([resultType])
+}

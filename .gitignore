@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+dist/
+build/
+coverage/
+.prisma/
+*.log
+*.sqlite
+Dockerfile*
+docker-compose*
