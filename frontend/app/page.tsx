@@ -129,8 +129,8 @@ export default function HomePage() {
               <Dna size={24} className="text-white" />
             </div>
             <div>
-              <span className="block font-black text-2xl tracking-tighter leading-none italic">BGMGA</span>
-              <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Bharat Genome Microbial Atlas</span>
+              <span className="block font-black text-2xl tracking-tighter leading-none italic">BMGA</span>
+              <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Bharat Microbial Genome Atlas</span>
             </div>
           </div>
           <div className="flex items-center gap-4">
