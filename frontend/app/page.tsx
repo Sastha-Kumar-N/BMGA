@@ -172,8 +172,8 @@ export default function HomePage() {
             </div>
             
             <h1 className="text-6xl lg:text-7xl font-black leading-[0.9] tracking-tighter">
-              Bharat Genome <br />
-              <span className="italic text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-orange-600">Microbial</span> Atlas.
+              Bharat Microbial <br />
+              <span className="italic text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-orange-600">Genome</span> Atlas.
             </h1>
             
             <p className="text-lg text-slate-400 max-w-md font-medium leading-relaxed">
