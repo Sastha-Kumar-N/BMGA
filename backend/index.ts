@@ -6,8 +6,12 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import fs from 'fs';
+import path from 'path';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
+import { getOrganismById } from './services/organismService';
+import { getOrganismResults, getOrganismToolResult, getToolOutputFile } from './services/resultService';
 // --- Database Configuration ---
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -25,6 +29,16 @@ const allowedOrigins = process.env.CORS_ORIGIN
   ?.split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
+
+function parseNumericParam(value: string | string[] | undefined) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function parseStringParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value || "";
+}
 
 app.use(cors({
   origin: allowedOrigins?.length ? allowedOrigins : true,
@@ -118,6 +132,77 @@ app.get('/api/organisms', async (req: Request, res: Response) => {
   }
 });
 
+app.get('/api/organisms/:id', async (req: Request, res: Response) => {
+  const organismId = parseNumericParam(req.params.id);
+  if (!organismId) {
+    return res.status(400).json({ error: "Invalid organism id" });
+  }
+
+  try {
+    const organism = await getOrganismById(prisma, organismId);
+    if (!organism) return res.status(404).json({ error: "Organism not found" });
+    res.json(organism);
+  } catch (error) {
+    console.error("Organism Fetch Error:", error);
+    res.status(500).json({ error: "Failed to fetch organism" });
+  }
+});
+
+app.get('/api/organisms/:id/results', async (req: Request, res: Response) => {
+  const organismId = parseNumericParam(req.params.id);
+  if (!organismId) {
+    return res.status(400).json({ error: "Invalid organism id" });
+  }
+
+  try {
+    const results = await getOrganismResults(prisma, organismId);
+    if (!results) return res.status(404).json({ error: "Organism not found" });
+    res.json(results);
+  } catch (error) {
+    console.error("Organism Results Error:", error);
+    res.status(500).json({ error: "Failed to fetch organism results" });
+  }
+});
+
+app.get('/api/organisms/:id/results/:tool', async (req: Request, res: Response) => {
+  const organismId = parseNumericParam(req.params.id);
+  if (!organismId) {
+    return res.status(400).json({ error: "Invalid organism id" });
+  }
+
+  try {
+    const result = await getOrganismToolResult(prisma, organismId, parseStringParam(req.params.tool));
+    if (!result) return res.status(404).json({ error: "Tool result not found" });
+    res.json(result);
+  } catch (error) {
+    console.error("Tool Result Error:", error);
+    res.status(500).json({ error: "Failed to fetch tool result" });
+  }
+});
+
+app.get('/api/organisms/:id/downloads/:tool/:fileId', async (req: Request, res: Response) => {
+  const organismId = parseNumericParam(req.params.id);
+  const fileId = parseNumericParam(req.params.fileId);
+  if (!organismId || !fileId) {
+    return res.status(400).json({ error: "Invalid download request" });
+  }
+
+  try {
+    const file = await getToolOutputFile(prisma, organismId, parseStringParam(req.params.tool), fileId);
+    if (!file) return res.status(404).json({ error: "File not found" });
+
+    const resolvedPath = path.resolve(file.filePath);
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).json({ error: "File path is not available on this server" });
+    }
+
+    res.download(resolvedPath, file.fileName);
+  } catch (error) {
+    console.error("Download Error:", error);
+    res.status(500).json({ error: "Failed to download result file" });
+  }
+});
+
 app.get('/api/strains', async (req: Request, res: Response) => {
   try {
     const strains = await prisma.strain.findMany({
@@ -152,9 +237,8 @@ app.post('/api/organisms', async (req: Request, res: Response) => {
 });
 
 app.get('/api/strains/:id', async (req: Request, res: Response) => {
-  const rawId = req.params.id;
-  const strainId = Number(Array.isArray(rawId) ? rawId[0] : rawId);
-  if (!Number.isInteger(strainId)) {
+  const strainId = parseNumericParam(req.params.id);
+  if (!strainId) {
     return res.status(400).json({ error: "Invalid strain id" });
   }
 

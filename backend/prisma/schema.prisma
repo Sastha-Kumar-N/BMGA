@@ -13,6 +13,15 @@ enum UserRole {
   OTHER
 }
 
+enum ToolRunStatus {
+  COMPLETED
+  FAILED
+  PENDING
+  NOT_AVAILABLE
+  WARNING
+  PARTIAL
+}
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -38,6 +47,7 @@ model Organism {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   strains        Strain[]
+  toolRuns       ToolRun[]
 
   @@index([genus])
   @@index([species])
@@ -77,6 +87,7 @@ model Strain {
   fileAssets      FileAsset[]
   amrGenes        AmrGene[]
   analysisRuns    AnalysisRun[]
+  toolRuns        ToolRun[]
 
   @@index([organismId])
   @@index([strainName])
@@ -532,4 +543,58 @@ model ToolResult {
 
   @@index([analysisRunId])
   @@index([resultType])
+}
+
+model ToolRun {
+  id         Int           @id @default(autoincrement())
+  organismId Int
+  strainId   Int?
+  toolName   String
+  status     ToolRunStatus @default(PENDING)
+  version    String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  summary    Json?
+  warnings   Json?
+  errors     Json?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  organism Organism          @relation(fields: [organismId], references: [id], onDelete: Cascade)
+  strain   Strain?           @relation(fields: [strainId], references: [id], onDelete: Cascade)
+  tables   ToolResultTable[]
+  files    ToolOutputFile[]
+
+  @@index([organismId])
+  @@index([strainId])
+  @@index([toolName])
+  @@index([status])
+}
+
+model ToolResultTable {
+  id        Int      @id @default(autoincrement())
+  toolRunId Int
+  tableName String
+  columns   Json
+  rows      Json
+  createdAt DateTime @default(now())
+
+  toolRun ToolRun @relation(fields: [toolRunId], references: [id], onDelete: Cascade)
+
+  @@index([toolRunId])
+}
+
+model ToolOutputFile {
+  id          Int      @id @default(autoincrement())
+  toolRunId   Int
+  fileName    String
+  fileType    String?
+  filePath    String
+  description String?
+  createdAt   DateTime @default(now())
+
+  toolRun ToolRun @relation(fields: [toolRunId], references: [id], onDelete: Cascade)
+
+  @@index([toolRunId])
+  @@index([fileType])
 }

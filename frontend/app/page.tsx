@@ -110,9 +110,9 @@ export default function HomePage() {
   }, [strains, query]);
 
   // 3. Routing Guard
-  const handleAnalyzeClick = () => {
+  const handleAnalyzeClick = (organismId: number) => {
     if (session) {
-      router.push('/dashboard');
+      router.push(`/organisms/${organismId}/results`);
     } else {
       router.push('/login');
     }
@@ -264,10 +264,10 @@ export default function HomePage() {
                         </td>
                         <td className="px-8 py-6 text-right">
                           <button 
-                            onClick={handleAnalyzeClick}
+                            onClick={() => handleAnalyzeClick(strain.organismId)}
                             className="inline-flex items-center gap-2 bg-[#0B1B3A] text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-orange-500 transition-colors shadow-md"
                           >
-                            Analyze <ChevronRight size={14} />
+                            Results <ChevronRight size={14} />
                           </button>
                         </td>
                       </tr>

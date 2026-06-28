@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { PrismaClient, UserRole } from '@prisma/client';
+import { Prisma, PrismaClient, ToolRunStatus, UserRole } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
@@ -11,6 +11,100 @@ if (!connectionString) {
 const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+
+async function seedToolRun(toolName: string, organismId: number, strainId: number, summary: Record<string, unknown>, table: { tableName: string; columns: string[]; rows: Record<string, unknown>[] }) {
+  const existing = await prisma.toolRun.findFirst({
+    where: { organismId, strainId, toolName },
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return prisma.toolRun.create({
+    data: {
+      organismId,
+      strainId,
+      toolName,
+      status: ToolRunStatus.COMPLETED,
+      version: 'demo-import',
+      finishedAt: new Date(),
+      summary: summary as Prisma.InputJsonValue,
+      tables: {
+        create: {
+          tableName: table.tableName,
+          columns: table.columns as Prisma.InputJsonValue,
+          rows: table.rows as Prisma.InputJsonValue,
+        },
+      },
+      files: {
+        create: {
+          fileName: `${toolName}.tsv`,
+          fileType: 'tsv',
+          filePath: `/demo-results/${organismId}/${toolName}/${toolName}.tsv`,
+          description: `${toolName} example raw output placeholder`,
+        },
+      },
+    },
+  });
+}
+
+async function ensureDemoToolRuns(organismId: number, strainId: number) {
+  const existingCount = await prisma.toolRun.count({ where: { organismId } });
+  if (existingCount > 0) {
+    console.log('✅ Generic organism result records already present');
+    return;
+  }
+
+  await seedToolRun(
+    'abricate',
+    organismId,
+    strainId,
+    { total_hits: 3, unique_genes: 3, database_counts: { card: 2, vfdb: 1 } },
+    {
+      tableName: 'AMR/VF/plasmid hits',
+      columns: ['gene', 'database', 'identity', 'coverage', 'contig', 'start', 'end', 'product'],
+      rows: [
+        { gene: 'blaPAO', database: 'card', identity: 100, coverage: 99.2, contig: 'contig_001', start: 4211, end: 5122, product: 'Beta-lactamase' },
+        { gene: 'catB7', database: 'card', identity: 98.5, coverage: 96.1, contig: 'contig_018', start: 8801, end: 9480, product: 'Chloramphenicol acetyltransferase' },
+      ],
+    }
+  );
+
+  await seedToolRun(
+    'quast',
+    organismId,
+    strainId,
+    { contigs: 142, total_length: 6260000, largest_contig: 312400, n50: 87400, l50: 18, gc_percent: 66.6 },
+    {
+      tableName: 'Assembly metrics',
+      columns: ['metric', 'value'],
+      rows: [
+        { metric: 'N50', value: 87400 },
+        { metric: 'L50', value: 18 },
+        { metric: 'Total length', value: 6260000 },
+      ],
+    }
+  );
+
+  await seedToolRun(
+    'checkm',
+    organismId,
+    strainId,
+    { completeness: 99.2, contamination: 0.4, strain_heterogeneity: 0, lineage: 'Pseudomonadaceae' },
+    {
+      tableName: 'Genome quality',
+      columns: ['metric', 'value'],
+      rows: [
+        { metric: 'Completeness', value: '99.2%' },
+        { metric: 'Contamination', value: '0.4%' },
+        { metric: 'Lineage', value: 'Pseudomonadaceae' },
+      ],
+    }
+  );
+
+  console.log('✅ Generic organism result records seeded');
+}
 
 async function main() {
   console.log('🌱 Starting database seed...');
@@ -91,6 +185,7 @@ async function main() {
       })
     : await prisma.strain.create({ data: strainData });
   console.log(`✅ Strain ready: ${strain.strainName}`);
+  await ensureDemoToolRuns(organism.id, strain.id);
 
   // 4. Ensure AMR alerts exist without duplicating them on every seed.
   const amrCount = await prisma.amrGene.count({ where: { strainId: strain.id } });
