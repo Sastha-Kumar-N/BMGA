@@ -11,6 +11,7 @@ import {
   FileText, Cpu, Layers, Fingerprint, Filter
 } from 'lucide-react';
 import PlatformAnalytics from '../components/PlatformAnalytics';
+import { apiPath } from '../lib/api-client';
 // ─── HELPER COMPONENTS ────────────────────────────────────────────────────────
 
 const StatCard = ({ title, value, icon: Icon, color }: any) => (
@@ -66,8 +67,8 @@ export default function Dashboard() {
 
   // Fetch Initial Data
   useEffect(() => {
-    fetch('http://localhost:3001/api/strains').then(res => res.json()).then(setStrainsList).catch(console.error);
-    fetch('http://localhost:3001/api/dashboard/summary').then(res => res.json()).then(setSummaryData).catch(console.error);
+    fetch(apiPath('/strains')).then(res => res.json()).then(setStrainsList).catch(console.error);
+    fetch(apiPath('/dashboard/summary')).then(res => res.json()).then(setSummaryData).catch(console.error);
   }, []);
 
   // Deep Fetch specific strain
@@ -77,7 +78,7 @@ export default function Dashboard() {
       return;
     }
     setLoading(true);
-    fetch(`http://localhost:3001/api/strains/${selectedStrainId}`)
+    fetch(apiPath(`/strains/${selectedStrainId}`))
       .then(res => res.json())
       .then(data => {
         setStrainData(data);

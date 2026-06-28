@@ -1,7 +1,18 @@
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import type { NextAuthOptions } from "next-auth";
+import { serverApiUrl } from "@/app/lib/api-server";
 
-const handler = NextAuth({
+type LoginResponse = {
+  token?: string;
+  user?: {
+    id: string;
+    name?: string | null;
+    role?: string;
+  };
+};
+
+const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       name: "Genomics Account",
@@ -10,42 +21,56 @@ const handler = NextAuth({
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
-        // We forward the login request to your EXPRESS backend (Port 3001)
-        const res = await fetch("http://localhost:3001/api/auth/login", {
+        if (!credentials?.email || !credentials.password) {
+          return null;
+        }
+
+        const res = await fetch(serverApiUrl("/auth/login"), {
           method: 'POST',
-          body: JSON.stringify(credentials),
+          body: JSON.stringify({
+            email: credentials.email,
+            password: credentials.password,
+          }),
           headers: { "Content-Type": "application/json" }
         });
 
-        const data = await res.json();
+        const data = await res.json() as LoginResponse;
 
-        // If the backend says "Login successful", return the user and token
-        if (res.ok && data.user) {
-          return { ...data.user, accessToken: data.token };
+        if (res.ok && data.user && data.token) {
+          return {
+            id: data.user.id,
+            name: data.user.name,
+            email: credentials.email,
+            role: data.user.role,
+            accessToken: data.token,
+          };
         }
         return null;
       }
     })
   ],
   callbacks: {
-    async jwt({ token, user }: any) {
+    async jwt({ token, user }) {
       if (user) {
         token.accessToken = user.accessToken;
         token.role = user.role;
       }
       return token;
     },
-    async session({ session, token }: any) {
+    async session({ session, token }) {
       if (session.user) {
-        (session.user as any).accessToken = token.accessToken;
-        (session.user as any).role = token.role;
+        session.user.accessToken = token.accessToken;
+        session.user.role = token.role;
       }
       return session;
     }
   },
+  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "dev-secret-change-me",
   pages: {
-    signIn: '/login', // We will create this next
+    signIn: '/login',
   }
-});
+};
+
+const handler = NextAuth(authOptions);
 
 export { handler as GET, handler as POST };

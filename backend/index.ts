@@ -1,34 +1,65 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import fs from 'fs';
 import csv from 'csv-parser';
-import { Readable } from 'stream'; // Add this to your imports at the top if not there
+import { Readable } from 'stream';
 // --- Database Configuration ---
 const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error('DATABASE_URL is required to start the API server.');
+}
+
 const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 const app = express();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
+const PORT = Number(process.env.PORT || 3001);
+const allowedOrigins = process.env.CORS_ORIGIN
+  ?.split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
 
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: allowedOrigins?.length ? allowedOrigins : true,
+  credentials: true,
+}));
+app.use(express.json({ limit: '10mb' }));
+
+app.get('/api/health', async (_req: Request, res: Response) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok' });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(503).json({ status: 'error', error: 'Database unavailable' });
+  }
+});
 
 // ─── AUTHENTICATION ROUTES ──────────────────────────────────────────────────
 
 app.post('/api/auth/signup', async (req: Request, res: Response) => {
   try {
     const { email, password, name, role } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    const safeRole = Object.values(UserRole).includes(role) ? role : UserRole.STUDENT;
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = await prisma.user.create({
-      data: { email, name, role, password: hashedPassword },
+      data: {
+        email,
+        name: name || email.split('@')[0],
+        role: safeRole,
+        password: hashedPassword,
+      },
     });
     res.status(201).json({ message: "User created", userId: newUser.id });
   } catch (error: any) {
@@ -121,10 +152,15 @@ app.post('/api/organisms', async (req: Request, res: Response) => {
 });
 
 app.get('/api/strains/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const strainId = Number(Array.isArray(rawId) ? rawId[0] : rawId);
+  if (!Number.isInteger(strainId)) {
+    return res.status(400).json({ error: "Invalid strain id" });
+  }
+
   try {
     const strain = await prisma.strain.findUnique({
-      where: { id: parseInt(id) },
+      where: { id: strainId },
       include: {
         organism: true,
         amrGenes: true,
@@ -250,6 +286,6 @@ app.post('/api/strains', async (req: Request, res: Response) => {
 });
 // ─── START SERVER ────────────────────────────────────────────────────────────
 
-app.listen(3001, () => {
-  console.log('🚀 Bharat Genome Atlas API Live: http://localhost:3001');
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Bharat Genome Atlas API live on port ${PORT}`);
 });

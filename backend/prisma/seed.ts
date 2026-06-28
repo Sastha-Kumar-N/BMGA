@@ -1,9 +1,13 @@
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
 const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error('DATABASE_URL is required to seed the database.');
+}
+
 const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
@@ -11,30 +15,40 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log('🌱 Starting database seed...');
 
-  // 1. Clean existing data to prevent duplicates on re-seeding
-  console.log('🧹 Cleaning existing data...');
-  await prisma.user.deleteMany({});
-  await prisma.analysisRun.deleteMany({});
-  await prisma.amrGene.deleteMany({});
-  await prisma.strain.deleteMany({});
-  await prisma.organism.deleteMany({});
-
-  // 2. Create the Admin User for Login
-  console.log('👤 Creating admin user...');
+  // 1. Ensure the demo login exists.
+  console.log('👤 Ensuring demo user exists...');
   const hashedPassword = await bcrypt.hash('admin123', 10);
-  const adminUser = await prisma.user.create({
-    data: {
+  const adminUser = await prisma.user.upsert({
+    where: { email: 'admin@genomics.com' },
+    update: {
+      password: hashedPassword,
+      name: 'System Admin',
+      role: UserRole.RESEARCHER,
+    },
+    create: {
       email: 'admin@genomics.com',
       password: hashedPassword,
       name: 'System Admin',
-      // role: 'ADMIN' // Uncomment if your schema has a role field
-    }
+      role: UserRole.RESEARCHER,
+    },
   });
-  console.log(`✅ Created User: ${adminUser.email} | Password: admin123`);
+  console.log(`✅ Demo login ready: ${adminUser.email} | Password: admin123`);
 
-  // 3. Create the Base Organism
-  const organism = await prisma.organism.create({
-    data: {
+  // 2. Ensure the base organism exists.
+  const organism = await prisma.organism.upsert({
+    where: { scientificName: 'Pseudomonas aeruginosa' },
+    update: {
+      domain: 'Bacteria',
+      phylum: 'Pseudomonadota',
+      className: 'Gammaproteobacteria',
+      orderName: 'Pseudomonadales',
+      family: 'Pseudomonadaceae',
+      genus: 'Pseudomonas',
+      species: 'aeruginosa',
+      taxonomyId: 287,
+      description: 'A Gram-negative, strictly aerobic, encapsulated, uniflagellated bacterium that acts as an opportunistic human pathogen.',
+    },
+    create: {
       scientificName: 'Pseudomonas aeruginosa',
       domain: 'Bacteria',
       phylum: 'Pseudomonadota',
@@ -45,39 +59,61 @@ async function main() {
       species: 'aeruginosa',
       taxonomyId: 287,
       description: 'A Gram-negative, strictly aerobic, encapsulated, uniflagellated bacterium that acts as an opportunistic human pathogen.',
-    }
+    },
   });
-  console.log(`✅ Created Organism: ${organism.scientificName}`);
+  console.log(`✅ Organism ready: ${organism.scientificName}`);
 
-  // 4. Create the Specific Strain (PAO1)
-  const strain = await prisma.strain.create({
-    data: {
+  // 3. Ensure the specific strain exists.
+  const existingStrain = await prisma.strain.findFirst({
+    where: {
       organismId: organism.id,
       strainName: 'PAO1',
-      sourceType: 'Clinical',
-      host: 'Homo sapiens',
-      country: 'India',
-      city: 'Chennai',
-      latitude: 13.0827,
-      longitude: 80.2707,
-      genomeSize: 6264404, // ~6.2 Mb
-      gcContent: 66.6,
-      createdAt: new Date(),
-    }
+    },
   });
-  console.log(`✅ Created Strain: ${strain.strainName}`);
 
-  // 5. Inject AMR Genes (Alerts for the Dashboard)
-  await prisma.amrGene.createMany({
-    data: [
-      { strainId: strain.id, geneSymbol: 'blaPAO', drugClass: 'Beta-lactam', identity: 100.0 },
-      { strainId: strain.id, geneSymbol: 'aph(3\')-IIb', drugClass: 'Aminoglycoside', identity: 99.8 },
-      { strainId: strain.id, geneSymbol: 'catB7', drugClass: 'Phenicol', identity: 98.5 }
-    ]
-  });
-  console.log(`✅ Injected AMR Genes`);
+  const strainData = {
+    organismId: organism.id,
+    strainName: 'PAO1',
+    sourceType: 'Clinical',
+    host: 'Homo sapiens',
+    country: 'India',
+    city: 'Chennai',
+    latitude: 13.0827,
+    longitude: 80.2707,
+    genomeSize: 6264404,
+    gcContent: 66.6,
+  };
 
-  // 6. Generate Analysis Runs for all 20 Tools
+  const strain = existingStrain
+    ? await prisma.strain.update({
+        where: { id: existingStrain.id },
+        data: strainData,
+      })
+    : await prisma.strain.create({ data: strainData });
+  console.log(`✅ Strain ready: ${strain.strainName}`);
+
+  // 4. Ensure AMR alerts exist without duplicating them on every seed.
+  const amrCount = await prisma.amrGene.count({ where: { strainId: strain.id } });
+  if (amrCount === 0) {
+    await prisma.amrGene.createMany({
+      data: [
+        { strainId: strain.id, geneSymbol: 'blaPAO', drugClass: 'Beta-lactam', identity: 100.0 },
+        { strainId: strain.id, geneSymbol: 'aph(3\')-IIb', drugClass: 'Aminoglycoside', identity: 99.8 },
+        { strainId: strain.id, geneSymbol: 'catB7', drugClass: 'Phenicol', identity: 98.5 }
+      ]
+    });
+    console.log(`✅ AMR genes ready`);
+  } else {
+    console.log(`✅ AMR genes already present`);
+  }
+
+  // 5. Generate Analysis Runs for all 20 Tools only when absent.
+  const analysisRunCount = await prisma.analysisRun.count({ where: { strainId: strain.id } });
+  if (analysisRunCount > 0) {
+    console.log(`✅ Pipeline results already present`);
+    return;
+  }
+
   console.log('⚙️ Simulating Bioinformatics Pipeline Results...');
 
   // Quality Control

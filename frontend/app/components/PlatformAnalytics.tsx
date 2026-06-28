@@ -6,6 +6,7 @@ import {
   PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { Activity, MapPin } from 'lucide-react';
+import { apiPath } from '../lib/api-client';
 
 // Theme Colors
 const COLORS = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#ef4444'];
@@ -15,7 +16,7 @@ export default function PlatformAnalytics({ strains }: { strains: any[] }) {
 
   // Fetch the GC Distribution from the backend
   useEffect(() => {
-    fetch('http://localhost:3001/api/stats/gc-distribution')
+    fetch(apiPath('/stats/gc-distribution'))
       .then(res => res.json())
       .then(data => setGcData(data))
       .catch(console.error);

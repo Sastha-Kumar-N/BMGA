@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { signOut, useSession } from "next-auth/react";
+import { apiPath } from './lib/api-client';
 import {
   Activity,
   ArrowRight,
@@ -14,7 +15,6 @@ import {
   RefreshCcw,
   Search,
   ShieldAlert,
-  ShieldCheck,
   LogOut,
   Microscope,
   Globe2,
@@ -75,8 +75,8 @@ export default function HomePage() {
     async function initPlatform() {
       try {
         const [strainsRes, summaryRes] = await Promise.all([
-          fetch('http://localhost:3001/api/strains'),
-          fetch('http://localhost:3001/api/dashboard/summary')
+          fetch(apiPath('/strains')),
+          fetch(apiPath('/dashboard/summary'))
         ]);
         
         if (strainsRes.ok) {

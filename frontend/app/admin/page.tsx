@@ -6,6 +6,7 @@ import {
   FileText, Dna, Microscope, MapPin, Layers 
 } from 'lucide-react';
 import { useSession } from 'next-auth/react';
+import { apiPath } from '../lib/api-client';
 
 export default function UnifiedAdminDashboard() {
   const { data: session } = useSession();
@@ -22,8 +23,8 @@ export default function UnifiedAdminDashboard() {
   const fetchData = async () => {
     try {
       const [orgRes, strainRes] = await Promise.all([
-        fetch('http://localhost:3001/api/organisms'),
-        fetch('http://localhost:3001/api/strains')
+        fetch(apiPath('/organisms')),
+        fetch(apiPath('/strains'))
       ]);
       const orgData = await orgRes.json();
       const strainData = await strainRes.json();
@@ -59,7 +60,7 @@ export default function UnifiedAdminDashboard() {
     e.preventDefault();
     setStatus({ type: 'loading', message: 'Registering species...' });
     try {
-      const res = await fetch('http://localhost:3001/api/organisms', {
+      const res = await fetch(apiPath('/organisms'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(orgForm)
       });
       if (!res.ok) throw new Error("Failed");
@@ -76,7 +77,7 @@ export default function UnifiedAdminDashboard() {
     e.preventDefault();
     setStatus({ type: 'loading', message: 'Registering isolate...' });
     try {
-      const res = await fetch('http://localhost:3001/api/strains', {
+      const res = await fetch(apiPath('/strains'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(strainForm)
       });
       if (!res.ok) throw new Error("Failed");
@@ -96,7 +97,7 @@ export default function UnifiedAdminDashboard() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const res = await fetch('http://localhost:3001/api/upload-results', {
+        const res = await fetch(apiPath('/upload-results'), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ strainId: ingestForm.strainId, toolName: ingestForm.toolName, fileContent: event.target?.result })
         });
