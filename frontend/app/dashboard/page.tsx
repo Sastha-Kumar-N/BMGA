@@ -528,61 +528,59 @@ function OperationalMetricsStrip({ strains, allStrains, alerts, allAlerts }: {
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="overflow-x-auto">
-        <div className="grid min-w-[1180px] grid-cols-7 divide-x divide-slate-100">
-          <KpiCell
-            icon={Database}
-            label="Genome Records"
-            value={formatIndianNumber(strains.length)}
-            detail={`${formatIndianNumber(allStrains.length)} total records`}
-            tone="orange"
-          />
-          <KpiCell
-            icon={Activity}
-            label="New This 30 Days"
-            value={formatIndianNumber(newThisMonth)}
-            detail="Current result set"
-            tone="emerald"
-          />
-          <KpiCell
-            icon={MapPin}
-            label="Unique Locations"
-            value={formatIndianNumber(uniqueLocationCount(strains))}
-            detail={`${mappedRecords(strains)} mapped coordinates`}
-            tone="blue"
-          />
-          <KpiCell
-            icon={Microscope}
-            label="Organisms Tracked"
-            value={formatIndianNumber(uniqueOrganismCount(strains))}
-            detail={domainSummary}
-            tone="slate"
-          />
-          <KpiCell
-            icon={ShieldAlert}
-            label="AMR Detections"
-            value={formatIndianNumber(alerts.length)}
-            detail={`${formatIndianNumber(allAlerts.length)} total alerts`}
-            tone="red"
-            emphasis
-          />
-          <KpiCell
-            icon={AlertTriangle}
-            label="High-Risk Alerts"
-            value={formatIndianNumber(highRisk)}
-            detail="Identity/drug-class flagged"
-            tone="red"
-            emphasis
-          />
-          <KpiCell
-            icon={CheckCircle2}
-            label="Avg. Genome Coverage"
-            value={`${genomeCoverageScore(strains).toFixed(1)}%`}
-            detail={medianDepthLabel(strains)}
-            tone="emerald"
-            ring
-          />
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-7">
+        <KpiCell
+          icon={Database}
+          label="Genome Records"
+          value={formatIndianNumber(strains.length)}
+          detail={`${formatIndianNumber(allStrains.length)} total records`}
+          tone="orange"
+        />
+        <KpiCell
+          icon={Activity}
+          label="New This 30 Days"
+          value={formatIndianNumber(newThisMonth)}
+          detail="Current result set"
+          tone="emerald"
+        />
+        <KpiCell
+          icon={MapPin}
+          label="Unique Locations"
+          value={formatIndianNumber(uniqueLocationCount(strains))}
+          detail={`${mappedRecords(strains)} mapped coordinates`}
+          tone="blue"
+        />
+        <KpiCell
+          icon={Microscope}
+          label="Organisms Tracked"
+          value={formatIndianNumber(uniqueOrganismCount(strains))}
+          detail={domainSummary}
+          tone="slate"
+        />
+        <KpiCell
+          icon={ShieldAlert}
+          label="AMR Detections"
+          value={formatIndianNumber(alerts.length)}
+          detail={`${formatIndianNumber(allAlerts.length)} total alerts`}
+          tone="red"
+          emphasis
+        />
+        <KpiCell
+          icon={AlertTriangle}
+          label="High-Risk Alerts"
+          value={formatIndianNumber(highRisk)}
+          detail="Identity/drug-class flagged"
+          tone="red"
+          emphasis
+        />
+        <KpiCell
+          icon={CheckCircle2}
+          label="Avg. Genome Coverage"
+          value={`${genomeCoverageScore(strains).toFixed(1)}%`}
+          detail={medianDepthLabel(strains)}
+          tone="emerald"
+          ring
+        />
       </div>
     </section>
   );
@@ -610,14 +608,14 @@ function KpiCell({ icon: Icon, label, value, detail, tone, emphasis = false, rin
   };
 
   return (
-    <div className="flex min-h-28 items-center gap-4 px-5 py-4">
+    <div className="flex min-h-28 items-center gap-4 border-b border-r border-slate-100 px-5 py-4">
       <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${toneClasses[tone]} ${ring ? 'ring-4 ring-emerald-100' : ''}`}>
         <Icon size={23} />
       </div>
       <div className="min-w-0">
-        <p className={`text-[10px] font-black uppercase tracking-widest ${emphasis ? 'text-red-500' : 'text-slate-500'}`}>{label}</p>
+        <p className={`text-[10px] font-black uppercase leading-snug tracking-widest ${emphasis ? 'text-red-500' : 'text-slate-500'}`}>{label}</p>
         <p className={`mt-1 text-2xl font-black tracking-tight ${emphasis ? 'text-red-600' : 'text-[#0B1B3A]'}`}>{value}</p>
-        <p className="mt-1 truncate text-[11px] font-bold text-slate-500">{detail}</p>
+        <p className="mt-1 text-[11px] font-bold leading-snug text-slate-500">{detail}</p>
       </div>
     </div>
   );
