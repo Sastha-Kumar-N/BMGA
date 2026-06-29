@@ -43,6 +43,7 @@ type DensityCell = {
 
 type IndiaOrganismAtlasProps = {
   strains: AtlasStrain[];
+  activeStrainId?: number | null;
   onOpenOrganism: (organismId: number) => void;
 };
 
@@ -105,7 +106,7 @@ function getSourceStyle(sourceType?: string | null) {
   return SOURCE_STYLES[sourceKey(sourceType)];
 }
 
-export default function IndiaOrganismAtlas({ strains, onOpenOrganism }: IndiaOrganismAtlasProps) {
+export default function IndiaOrganismAtlas({ strains, activeStrainId, onOpenOrganism }: IndiaOrganismAtlasProps) {
   const atlasPoints = useMemo<AtlasPoint[]>(() => (
     strains
       .map((strain) => {
@@ -122,7 +123,8 @@ export default function IndiaOrganismAtlas({ strains, onOpenOrganism }: IndiaOrg
       .filter((strain): strain is AtlasPoint => Boolean(strain))
   ), [strains]);
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [manualSelectedId, setManualSelectedId] = useState<number | null>(null);
+  const selectedId = activeStrainId || manualSelectedId;
   const selectedPoint = atlasPoints.find((point) => point.id === selectedId) || atlasPoints[0];
 
   const densityCells = useMemo<DensityCell[]>(() => (
@@ -223,7 +225,7 @@ export default function IndiaOrganismAtlas({ strains, onOpenOrganism }: IndiaOrg
               key={point.id}
               data-atlas-point="true"
               type="button"
-              onClick={() => setSelectedId(point.id)}
+              onClick={() => setManualSelectedId(point.id)}
               title={`${point.organism?.scientificName || 'Unknown organism'} ${point.strainName || ''}`}
               className={`absolute z-10 rounded-full border-2 border-white shadow-lg shadow-slate-900/20 transition hover:scale-125 focus:outline-none focus:ring-4 focus:ring-orange-300 ${
                 isSelected ? 'h-6 w-6' : 'h-5 w-5'
@@ -239,6 +241,16 @@ export default function IndiaOrganismAtlas({ strains, onOpenOrganism }: IndiaOrg
             </button>
           );
         })}
+
+        {atlasPoints.length === 0 && (
+          <div className="absolute left-1/2 top-1/2 z-20 w-[min(360px,calc(100%-40px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-dashed border-slate-300 bg-white/90 p-6 text-center shadow-xl backdrop-blur">
+            <MapPin className="mx-auto mb-4 text-slate-300" size={38} />
+            <h3 className="text-lg font-black text-[#0B1B3A]">No mapped organisms in this result set</h3>
+            <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+              Add latitude and longitude metadata in the admin portal or clear the current filter to show atlas points.
+            </p>
+          </div>
+        )}
 
         {selectedPoint && (
           <div className="absolute left-5 top-5 z-20 w-[min(360px,calc(100%-40px))] rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-2xl backdrop-blur">
@@ -256,7 +268,7 @@ export default function IndiaOrganismAtlas({ strains, onOpenOrganism }: IndiaOrg
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedId(null)}
+                onClick={() => setManualSelectedId(null)}
                 className="rounded-lg px-2 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                 aria-label="Clear selected atlas point"
               >

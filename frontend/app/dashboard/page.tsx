@@ -16,7 +16,6 @@ import {
   FlaskConical,
   Globe2,
   LayoutDashboard,
-  Layers,
   Lock,
   LogOut,
   MapPin,
@@ -25,6 +24,7 @@ import {
   Search,
   ShieldAlert,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../lib/api-client';
 import type { AtlasStrain } from '../components/IndiaOrganismAtlas';
 
@@ -57,6 +57,7 @@ type StrainRecord = AtlasStrain & {
   strainCode?: string | null;
   bioprojectAccession?: string | null;
   genomeStatus?: string | null;
+  metadata?: Record<string, unknown> | null;
   createdAt?: string | null;
 };
 
@@ -81,6 +82,14 @@ type SummaryData = {
 const EMPTY_SUMMARY: SummaryData = {
   recentStrains: [],
   recentAmr: [],
+};
+
+const SOURCE_COLORS = {
+  clinical: '#2563eb',
+  environmental: '#16a34a',
+  animal: '#f97316',
+  food: '#7c3aed',
+  other: '#64748b',
 };
 
 function numericValue(value: number | string | null | undefined) {
@@ -112,26 +121,104 @@ function uniqueLocationCount(strains: StrainRecord[]) {
   return new Set(strains.map((strain) => locationLabel(strain))).size;
 }
 
-function averageGc(strains: StrainRecord[]) {
-  const values = strains
-    .map((strain) => numericValue(strain.gcContent))
-    .filter((value): value is number => value !== null);
+function countRecentRecords(strains: StrainRecord[], days: number) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
 
-  if (!values.length) return 'N/A';
-  return `${(values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2)}%`;
+  return strains.filter((strain) => {
+    if (!strain.createdAt) return false;
+    const createdAt = new Date(strain.createdAt);
+    return Number.isFinite(createdAt.getTime()) && createdAt >= cutoff;
+  }).length;
+}
+
+function visibleAmrAlerts(alerts: AmrAlert[], strains: StrainRecord[]) {
+  const visibleIds = new Set(strains.map((strain) => strain.id));
+  return alerts.filter((alert) => visibleIds.has(alert.strainId));
+}
+
+function isHighRiskAlert(alert: AmrAlert) {
+  const identity = alert.identity || 0;
+  const drugClass = (alert.drugClass || '').toLowerCase();
+  return identity >= 99 || /carbapenem|colistin|critical|beta-lactam|glycopeptide/.test(drugClass);
+}
+
+function sourceGroup(sourceType?: string | null) {
+  const normalized = (sourceType || '').toLowerCase();
+  if (/clinical|hospital|patient/.test(normalized)) return { key: 'clinical', source: 'Clinical (Hospital)', color: SOURCE_COLORS.clinical };
+  if (/environment|soil|river|water|wastewater/.test(normalized)) return { key: 'environmental', source: 'Environmental', color: SOURCE_COLORS.environmental };
+  if (/animal|poultry|livestock/.test(normalized)) return { key: 'animal', source: 'Animal & Poultry', color: SOURCE_COLORS.animal };
+  if (/food|milk|meat|fish/.test(normalized)) return { key: 'food', source: 'Food & Water', color: SOURCE_COLORS.food };
+  return { key: 'other', source: 'Other', color: SOURCE_COLORS.other };
 }
 
 function sourceBreakdown(strains: StrainRecord[]) {
   const counts = new Map<string, number>();
   strains.forEach((strain) => {
-    const source = strain.sourceType || 'Unspecified';
-    counts.set(source, (counts.get(source) || 0) + 1);
+    const group = sourceGroup(strain.sourceType);
+    counts.set(group.key, (counts.get(group.key) || 0) + 1);
   });
 
   return Array.from(counts.entries())
-    .map(([source, count]) => ({ source, count }))
+    .map(([key, count]) => ({
+      ...sourceGroup(key),
+      count,
+      percent: strains.length ? (count / strains.length) * 100 : 0,
+    }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);
+}
+
+function hasValue(value: unknown) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function genomeCoverageScore(strains: StrainRecord[]) {
+  if (!strains.length) return 0;
+
+  const fields = strains.map((strain) => {
+    const values = [
+      strain.organism?.scientificName,
+      strain.organism?.taxonomyId,
+      strain.strainName,
+      strain.sourceType,
+      strain.city || strain.state || strain.country,
+      strain.latitude,
+      strain.longitude,
+      strain.genomeSize,
+      strain.gcContent,
+      strain.biosampleAccession || strain.assemblyAccession,
+    ];
+    return values.filter(hasValue).length / values.length;
+  });
+
+  return (fields.reduce((sum, value) => sum + value, 0) / fields.length) * 100;
+}
+
+function metadataNumber(strain: StrainRecord, keys: string[]) {
+  for (const key of keys) {
+    const raw = strain.metadata?.[key];
+    if (raw === null || raw === undefined) continue;
+    const parsed = Number(String(raw).replace(/[xX]/g, ''));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function medianDepthLabel(strains: StrainRecord[]) {
+  const depths = strains
+    .map((strain) => metadataNumber(strain, ['medianDepth', 'depth', 'coverageDepth', 'coverage']))
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
+
+  if (!depths.length) return 'Median depth N/A';
+  const midpoint = Math.floor(depths.length / 2);
+  const median = depths.length % 2 === 0 ? (depths[midpoint - 1] + depths[midpoint]) / 2 : depths[midpoint];
+  return `Median depth ${median.toFixed(1)}x`;
+}
+
+function formatIndianNumber(value: number) {
+  return value.toLocaleString('en-IN');
 }
 
 export default function Dashboard() {
@@ -197,12 +284,23 @@ export default function Dashboard() {
   }, [query, strains]);
 
   const selectedStrain = useMemo(() => (
-    strains.find((strain) => strain.id.toString() === selectedStrainId) || strains[0] || null
-  ), [selectedStrainId, strains]);
+    (selectedStrainId ? strains.find((strain) => strain.id.toString() === selectedStrainId) : null)
+    || filteredStrains[0]
+    || strains[0]
+    || null
+  ), [filteredStrains, selectedStrainId, strains]);
+
+  const activeResultStrains = useMemo(() => (
+    selectedStrainId && selectedStrain ? [selectedStrain] : filteredStrains
+  ), [filteredStrains, selectedStrain, selectedStrainId]);
+
+  const activeAlerts = useMemo(() => (
+    visibleAmrAlerts(summaryData.recentAmr, activeResultStrains)
+  ), [activeResultStrains, summaryData.recentAmr]);
 
   const mappedPointCount = useMemo(() => (
-    strains.filter((strain) => numericValue(strain.latitude) !== null && numericValue(strain.longitude) !== null).length
-  ), [strains]);
+    activeResultStrains.filter((strain) => numericValue(strain.latitude) !== null && numericValue(strain.longitude) !== null).length
+  ), [activeResultStrains]);
 
   const openOrganismResults = (organismId?: number | null) => {
     if (!organismId) return;
@@ -289,7 +387,10 @@ export default function Dashboard() {
                 <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <input
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setSelectedStrainId('');
+                  }}
                   placeholder="Search organism, strain, source, accession..."
                   className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm font-bold text-[#0B1B3A] outline-none transition focus:border-orange-500 focus:bg-white"
                 />
@@ -311,12 +412,12 @@ export default function Dashboard() {
         </header>
 
         <div className="mx-auto max-w-7xl space-y-8 px-5 py-8 md:px-8">
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricTile icon={Database} label="Genome Records" value={strains.length.toString()} sublabel={`${uniqueOrganismCount(strains)} organisms`} tone="blue" />
-            <MetricTile icon={MapPin} label="Mapped Sources" value={mappedPointCount.toString()} sublabel={`${uniqueLocationCount(strains)} site labels`} tone="emerald" />
-            <MetricTile icon={ShieldAlert} label="AMR Alerts" value={summaryData.recentAmr.length.toString()} sublabel="Recent resistance signals" tone="red" />
-            <MetricTile icon={Activity} label="Mean GC Content" value={averageGc(strains)} sublabel="Across indexed records" tone="orange" />
-          </section>
+          <OperationalMetricsStrip
+            strains={activeResultStrains}
+            allStrains={strains}
+            alerts={activeAlerts}
+            allAlerts={summaryData.recentAmr}
+          />
 
           <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -345,27 +446,9 @@ export default function Dashboard() {
           </section>
 
           <section className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-black tracking-tight text-[#0B1B3A]">Sampling Sources</h2>
-                  <p className="mt-1 text-xs font-bold text-slate-500">Top source categories represented in the registry.</p>
-                </div>
-                <Layers className="text-orange-500" size={24} />
-              </div>
-              <div className="space-y-3">
-                {sourceBreakdown(strains).map((item) => (
-                  <SourceRow key={item.source} source={item.source} count={item.count} total={Math.max(strains.length, 1)} />
-                ))}
-                {strains.length === 0 && (
-                  <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
-                    No source metadata loaded yet.
-                  </p>
-                )}
-              </div>
-            </div>
+            <SamplingSourceDonut strains={activeResultStrains} totalRecords={strains.length} />
 
-            <AmrPanel alerts={summaryData.recentAmr} strains={strains} onSelect={(strainId) => setSelectedStrainId(strainId.toString())} />
+            <AmrPanel alerts={activeAlerts} strains={activeResultStrains} onSelect={(strainId) => setSelectedStrainId(strainId.toString())} />
           </section>
 
           <section id="india-atlas" className="scroll-mt-24 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-7">
@@ -378,10 +461,15 @@ export default function Dashboard() {
               </div>
               <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
                 <span className="rounded-full bg-slate-100 px-3 py-2">{mappedPointCount} mapped points</span>
+                <span className="rounded-full bg-slate-100 px-3 py-2">{activeResultStrains.length} result records</span>
                 <span className="rounded-full bg-orange-50 px-3 py-2 text-orange-600">Click marker for dossier</span>
               </div>
             </div>
-            <IndiaOrganismAtlas strains={strains} onOpenOrganism={openOrganismResults} />
+            <IndiaOrganismAtlas
+              strains={activeResultStrains}
+              activeStrainId={selectedStrainId ? selectedStrain?.id : null}
+              onOpenOrganism={openOrganismResults}
+            />
           </section>
         </div>
 
@@ -420,33 +508,233 @@ function SidebarButton({ active = false, disabled = false, icon: Icon, label, on
   );
 }
 
-function MetricTile({ icon: Icon, label, value, sublabel, tone }: {
-  icon: typeof Dna;
+function OperationalMetricsStrip({ strains, allStrains, alerts, allAlerts }: {
+  strains: StrainRecord[];
+  allStrains: StrainRecord[];
+  alerts: AmrAlert[];
+  allAlerts: AmrAlert[];
+}) {
+  const newThisMonth = countRecentRecords(strains, 30);
+  const highRisk = alerts.filter(isHighRiskAlert).length;
+  const domainCounts = strains.reduce<Record<string, number>>((acc, strain) => {
+    const domain = strain.organism?.domain || 'Unknown';
+    acc[domain] = (acc[domain] || 0) + 1;
+    return acc;
+  }, {});
+  const domainSummary = Object.entries(domainCounts)
+    .slice(0, 3)
+    .map(([domain, count]) => `${domain} ${count}`)
+    .join('   ') || 'No domain metadata';
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <div className="grid min-w-[1180px] grid-cols-7 divide-x divide-slate-100">
+          <KpiCell
+            icon={Database}
+            label="Genome Records"
+            value={formatIndianNumber(strains.length)}
+            detail={`${formatIndianNumber(allStrains.length)} total records`}
+            tone="orange"
+          />
+          <KpiCell
+            icon={Activity}
+            label="New This 30 Days"
+            value={formatIndianNumber(newThisMonth)}
+            detail="Current result set"
+            tone="emerald"
+          />
+          <KpiCell
+            icon={MapPin}
+            label="Unique Locations"
+            value={formatIndianNumber(uniqueLocationCount(strains))}
+            detail={`${mappedRecords(strains)} mapped coordinates`}
+            tone="blue"
+          />
+          <KpiCell
+            icon={Microscope}
+            label="Organisms Tracked"
+            value={formatIndianNumber(uniqueOrganismCount(strains))}
+            detail={domainSummary}
+            tone="slate"
+          />
+          <KpiCell
+            icon={ShieldAlert}
+            label="AMR Detections"
+            value={formatIndianNumber(alerts.length)}
+            detail={`${formatIndianNumber(allAlerts.length)} total alerts`}
+            tone="red"
+            emphasis
+          />
+          <KpiCell
+            icon={AlertTriangle}
+            label="High-Risk Alerts"
+            value={formatIndianNumber(highRisk)}
+            detail="Identity/drug-class flagged"
+            tone="red"
+            emphasis
+          />
+          <KpiCell
+            icon={CheckCircle2}
+            label="Avg. Genome Coverage"
+            value={`${genomeCoverageScore(strains).toFixed(1)}%`}
+            detail={medianDepthLabel(strains)}
+            tone="emerald"
+            ring
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function mappedRecords(strains: StrainRecord[]) {
+  return strains.filter((strain) => numericValue(strain.latitude) !== null && numericValue(strain.longitude) !== null).length;
+}
+
+function KpiCell({ icon: Icon, label, value, detail, tone, emphasis = false, ring = false }: {
+  icon: LucideIcon;
   label: string;
   value: string;
-  sublabel: string;
-  tone: 'blue' | 'emerald' | 'red' | 'orange';
+  detail: string;
+  tone: 'orange' | 'emerald' | 'blue' | 'red' | 'slate';
+  emphasis?: boolean;
+  ring?: boolean;
 }) {
   const toneClasses = {
-    blue: 'bg-blue-50 text-blue-600',
-    emerald: 'bg-emerald-50 text-emerald-600',
-    red: 'bg-red-50 text-red-600',
     orange: 'bg-orange-50 text-orange-600',
+    emerald: 'bg-emerald-50 text-emerald-600',
+    blue: 'bg-blue-50 text-blue-600',
+    red: 'bg-red-50 text-red-600',
+    slate: 'bg-slate-100 text-slate-600',
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
+    <div className="flex min-h-28 items-center gap-4 px-5 py-4">
+      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${toneClasses[tone]} ${ring ? 'ring-4 ring-emerald-100' : ''}`}>
+        <Icon size={23} />
+      </div>
+      <div className="min-w-0">
+        <p className={`text-[10px] font-black uppercase tracking-widest ${emphasis ? 'text-red-500' : 'text-slate-500'}`}>{label}</p>
+        <p className={`mt-1 text-2xl font-black tracking-tight ${emphasis ? 'text-red-600' : 'text-[#0B1B3A]'}`}>{value}</p>
+        <p className="mt-1 truncate text-[11px] font-bold text-slate-500">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function SamplingSourceDonut({ strains, totalRecords }: { strains: StrainRecord[]; totalRecords: number }) {
+  const data = sourceBreakdown(strains);
+  const totalSamples = strains.length;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-5 flex items-center justify-between">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
-          <p className="mt-3 text-3xl font-black tracking-tight text-[#0B1B3A]">{value}</p>
-          <p className="mt-1 text-xs font-bold text-slate-500">{sublabel}</p>
+          <h2 className="text-xl font-black tracking-tight text-[#0B1B3A]">Sampling Sources (Top 5)</h2>
+          <p className="mt-1 text-xs font-bold text-slate-500">Composition recalculates from the active dashboard result set.</p>
         </div>
-        <div className={`rounded-xl p-3 ${toneClasses[tone]}`}>
-          <Icon size={22} />
+        <div className="rounded-xl bg-blue-50 p-3 text-blue-600">
+          <Database size={22} />
+        </div>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="h-56">
+          {data.length ? (
+            <DonutChart data={data} total={totalSamples} />
+          ) : (
+            <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-xs font-bold text-slate-400">
+              No source metadata
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          {data.map((entry) => (
+            <div key={entry.key} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 text-sm">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span className="truncate font-bold text-slate-700">{entry.source}</span>
+              </div>
+              <span className="font-mono font-black text-[#0B1B3A]">{formatIndianNumber(entry.count)}</span>
+              <span className="w-16 text-right text-xs font-bold text-slate-500">({entry.percent.toFixed(1)}%)</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs">
+        <div className="font-bold text-slate-500">
+          Total Samples <span className="ml-6 font-mono font-black text-[#0B1B3A]">{formatIndianNumber(totalSamples)}</span>
+        </div>
+        <div className="font-black uppercase tracking-widest text-blue-600">
+          {formatIndianNumber(totalRecords)} in registry
         </div>
       </div>
     </div>
+  );
+}
+
+function DonutChart({ data, total }: {
+  data: ReturnType<typeof sourceBreakdown>;
+  total: number;
+}) {
+  const radius = 76;
+  const circumference = 2 * Math.PI * radius;
+  const segments = data.reduce<{
+    accumulated: number;
+    items: Array<{
+      key: string;
+      color: string;
+      dashLength: number;
+      dashOffset: number;
+    }>;
+  }>((acc, entry) => {
+    const fraction = total ? entry.count / total : 0;
+    const dashLength = fraction * circumference;
+    const dashOffset = -acc.accumulated * circumference;
+
+    return {
+      accumulated: acc.accumulated + fraction,
+      items: [
+        ...acc.items,
+        {
+          key: entry.key,
+          color: entry.color,
+          dashLength,
+          dashOffset,
+        },
+      ],
+    };
+  }, { accumulated: 0, items: [] }).items;
+
+  return (
+    <svg viewBox="0 0 220 220" className="h-full w-full" role="img" aria-label="Sampling source donut chart">
+      <circle cx="110" cy="110" r={radius} fill="none" stroke="#eef2f7" strokeWidth="34" />
+      {segments.map((entry) => (
+        <circle
+          key={entry.key}
+          cx="110"
+          cy="110"
+          r={radius}
+          fill="none"
+          stroke={entry.color}
+          strokeWidth="34"
+          strokeDasharray={`${entry.dashLength} ${circumference - entry.dashLength}`}
+          strokeDashoffset={entry.dashOffset}
+          strokeLinecap="butt"
+          transform="rotate(-90 110 110)"
+        />
+      ))}
+      <circle cx="110" cy="110" r="46" fill="white" />
+      <text x="110" y="106" textAnchor="middle" className="fill-[#0B1B3A] text-2xl font-black">
+        {formatIndianNumber(total)}
+      </text>
+      <text x="110" y="128" textAnchor="middle" className="fill-slate-400 text-[10px] font-black uppercase tracking-widest">
+        Samples
+      </text>
+    </svg>
   );
 }
 
@@ -589,22 +877,6 @@ function MiniSignal({ icon: Icon, label, value }: { icon: typeof Dna; label: str
       <Icon size={18} className="text-orange-300" />
       <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</p>
       <p className="mt-1 text-sm font-black text-white">{value}</p>
-    </div>
-  );
-}
-
-function SourceRow({ source, count, total }: { source: string; count: number; total: number }) {
-  const percent = Math.round((count / total) * 100);
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="font-black uppercase tracking-widest text-slate-500">{source}</span>
-        <span className="font-mono font-black text-[#0B1B3A]">{count}</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-        <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.max(percent, 8)}%` }} />
-      </div>
     </div>
   );
 }
