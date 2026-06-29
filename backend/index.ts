@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
-import { PrismaClient, UserRole } from '@prisma/client';
+import { Prisma, PrismaClient, UserRole } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import cors from 'cors';
@@ -11,7 +11,8 @@ import path from 'path';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
 import { getOrganismById } from './services/organismService';
-import { getOrganismResults, getOrganismToolResult, getToolOutputFile } from './services/resultService';
+import { getOrganismResults, getOrganismToolResult, getToolOutputFile, saveNormalizedToolRun } from './services/resultService';
+import { normalizeToolName } from './services/resultsParsers/toolDefinitions';
 // --- Database Configuration ---
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -40,6 +41,94 @@ function parseStringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value || "";
 }
 
+type AdminRequest = Request & {
+  user?: {
+    userId: string;
+    role: string;
+  };
+};
+
+function requireAdmin(req: AdminRequest, res: Response, next: () => void) {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: "Admin authentication required" });
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as { userId?: string; role?: string };
+    if (payload.role !== UserRole.ADMIN) {
+      return res.status(403).json({ error: "Admin role required" });
+    }
+    req.user = { userId: payload.userId || "", role: payload.role };
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid or expired admin token" });
+  }
+}
+
+function parseJsonObject(value: unknown, fallback: Record<string, unknown> = {}) {
+  if (!value) return fallback;
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return fallback;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseJsonArray(value: unknown) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  }
+}
+
+function parseDelimitedFile(fileContent: string, fileName: string) {
+  const trimmed = fileContent.trim();
+  if (!trimmed) return { columns: [] as string[], rows: [] as Record<string, unknown>[] };
+
+  if (fileName.toLowerCase().endsWith('.json')) {
+    const parsed = JSON.parse(trimmed);
+    const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.rows) ? parsed.rows : [];
+    const columns = Array.isArray(parsed.columns) ? parsed.columns.map(String) : Object.keys(rows[0] || {});
+    return { columns, rows };
+  }
+
+  const delimiter = fileName.toLowerCase().endsWith('.csv') ? ',' : '\t';
+  const lines = trimmed.split(/\r?\n/).filter(Boolean);
+  const columns = lines[0]?.split(delimiter).map((value) => value.trim()) || [];
+  const rows = lines.slice(1).map((line) => {
+    const values = line.split(delimiter).map((value) => value.trim());
+    return columns.reduce<Record<string, string>>((row, column, index) => {
+      row[column || `column_${index + 1}`] = values[index] || "";
+      return row;
+    }, {});
+  });
+
+  return { columns, rows };
+}
+
+function saveUploadedResultFile(organismId: number, toolName: string, fileName: string, fileContent: string) {
+  const safeTool = normalizeToolName(toolName).replace(/[^a-z0-9_]/gi, '_');
+  const safeFile = fileName.replace(/[^a-z0-9_.-]/gi, '_');
+  const uploadDir = path.resolve(process.cwd(), 'uploads', 'maya-results', String(organismId), safeTool);
+  fs.mkdirSync(uploadDir, { recursive: true });
+  const outputPath = path.join(uploadDir, `${Date.now()}-${safeFile}`);
+  fs.writeFileSync(outputPath, fileContent, 'utf8');
+  return outputPath;
+}
+
 app.use(cors({
   origin: allowedOrigins?.length ? allowedOrigins : true,
   credentials: true,
@@ -65,7 +154,8 @@ app.post('/api/auth/signup', async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    const safeRole = Object.values(UserRole).includes(role) ? role : UserRole.STUDENT;
+    const requestedRole = Object.values(UserRole).includes(role) ? role : UserRole.STUDENT;
+    const safeRole = requestedRole === UserRole.ADMIN ? UserRole.STUDENT : requestedRole;
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = await prisma.user.create({
       data: {
@@ -215,14 +305,187 @@ app.get('/api/strains', async (req: Request, res: Response) => {
 });
 
 
-app.post('/api/organisms', async (req: Request, res: Response) => {
+app.get('/api/admin/me', requireAdmin, async (req: AdminRequest, res: Response) => {
+  res.json({ ok: true, user: req.user });
+});
+
+app.patch('/api/admin/organisms/:id/metadata', requireAdmin, async (req: Request, res: Response) => {
+  const organismId = parseNumericParam(req.params.id);
+  if (!organismId) {
+    return res.status(400).json({ error: "Invalid organism id" });
+  }
+
   try {
-    const { scientificName, domain, genus, species, description } = req.body;
+    const {
+      scientificName,
+      displayName,
+      taxonomyId,
+      domain,
+      phylum,
+      className,
+      orderName,
+      family,
+      genus,
+      species,
+      description,
+    } = req.body;
+
+    const updated = await prisma.organism.update({
+      where: { id: organismId },
+      data: {
+        scientificName,
+        displayName,
+        taxonomyId: taxonomyId ? Number(taxonomyId) : undefined,
+        domain,
+        phylum,
+        className,
+        orderName,
+        family,
+        genus,
+        species,
+        description,
+      },
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error("Organism Metadata Update Error:", error);
+    res.status(500).json({ error: "Failed to update organism metadata" });
+  }
+});
+
+app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: Request, res: Response) => {
+  const strainId = parseNumericParam(req.params.id);
+  if (!strainId) {
+    return res.status(400).json({ error: "Invalid strain id" });
+  }
+
+  try {
+    const {
+      strainName,
+      isolateName,
+      strainCode,
+      biosampleAccession,
+      bioprojectAccession,
+      assemblyAccession,
+      sourceType,
+      host,
+      country,
+      state,
+      city,
+      collectionDate,
+      locationText,
+      latitude,
+      longitude,
+      genomeStatus,
+      genomeSize,
+      gcContent,
+      repoLink,
+      metadata,
+    } = req.body;
+
+    const updated = await prisma.strain.update({
+      where: { id: strainId },
+      data: {
+        strainName,
+        isolateName,
+        strainCode,
+        biosampleAccession,
+        bioprojectAccession,
+        assemblyAccession,
+        sourceType,
+        host,
+        country,
+        state,
+        city,
+        collectionDate: collectionDate ? new Date(collectionDate) : undefined,
+        locationText,
+        latitude: latitude !== undefined && latitude !== "" ? Number(latitude) : undefined,
+        longitude: longitude !== undefined && longitude !== "" ? Number(longitude) : undefined,
+        genomeStatus,
+        genomeSize: genomeSize !== undefined && genomeSize !== "" ? Number(genomeSize) : undefined,
+        gcContent: gcContent !== undefined && gcContent !== "" ? Number(gcContent) : undefined,
+        repoLink,
+        metadata: parseJsonObject(metadata) as Prisma.InputJsonValue,
+      },
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error("Strain Metadata Update Error:", error);
+    res.status(500).json({ error: "Failed to update strain metadata" });
+  }
+});
+
+app.post('/api/admin/maya-results', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const {
+      organismId,
+      strainId,
+      toolName,
+      status,
+      version,
+      summary,
+      tableName,
+      fileName,
+      fileContent,
+      warnings,
+      errors,
+    } = req.body;
+
+    const numericOrganismId = Number(organismId);
+    const numericStrainId = strainId ? Number(strainId) : null;
+    if (!Number.isInteger(numericOrganismId) || !toolName) {
+      return res.status(400).json({ error: "organismId and toolName are required" });
+    }
+
+    const rawFileName = fileName || `${normalizeToolName(toolName)}.tsv`;
+    const parsedTable = fileContent ? parseDelimitedFile(String(fileContent), rawFileName) : { columns: [] as string[], rows: [] as Record<string, unknown>[] };
+    const savedFilePath = fileContent ? saveUploadedResultFile(numericOrganismId, toolName, rawFileName, String(fileContent)) : undefined;
+
+    const savedRun = await saveNormalizedToolRun(prisma, numericOrganismId, numericStrainId, {
+      toolName,
+      status: status || "completed",
+      version,
+      finishedAt: new Date(),
+      summary: parseJsonObject(summary),
+      tables: parsedTable.columns.length ? [{
+        tableName: tableName || `${toolName} results`,
+        columns: parsedTable.columns,
+        rows: parsedTable.rows,
+      }] : [],
+      files: savedFilePath ? [{
+        fileName: rawFileName,
+        fileType: path.extname(rawFileName).replace('.', '') || 'raw',
+        filePath: savedFilePath,
+        description: `${toolName} MAYA upload`,
+      }] : [],
+      warnings: parseJsonArray(warnings),
+      errors: parseJsonArray(errors),
+    });
+
+    res.status(201).json({ message: "MAYA result ingested", toolRunId: savedRun.id });
+  } catch (error) {
+    console.error("MAYA Result Ingestion Error:", error);
+    res.status(500).json({ error: "Failed to ingest MAYA result" });
+  }
+});
+
+app.post('/api/organisms', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { scientificName, displayName, taxonomyId, domain, phylum, className, orderName, family, genus, species, description } = req.body;
+    if (!scientificName) {
+      return res.status(400).json({ error: "Scientific name is required" });
+    }
     
     const newOrg = await prisma.organism.create({
       data: {
         scientificName,
+        displayName,
+        taxonomyId: taxonomyId ? Number(taxonomyId) : undefined,
         domain: domain || 'Bacteria',
+        phylum,
+        className,
+        orderName,
+        family,
         genus: genus || 'Unknown',
         species: species || 'Unknown',
         description: description || 'Registered via Admin Panel',
@@ -286,7 +549,7 @@ app.get('/api/strains/:id', async (req: Request, res: Response) => {
 
 // ─── DATA UPLOAD & PROCESSING ────────────────────────────────────────────────
 
-app.post('/api/upload-results', async (req: Request, res: Response) => {
+app.post('/api/upload-results', requireAdmin, async (req: Request, res: Response) => {
   const { strainId, toolName, fileContent } = req.body;
   const results: any[] = [];
 
@@ -346,19 +609,55 @@ app.get('/api/stats/gc-distribution', async (req: Request, res: Response) => {
 });
 
 // ─── REGISTER NEW STRAIN ─────────────────────────────────────────────────────
-app.post('/api/strains', async (req: Request, res: Response) => {
+app.post('/api/strains', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { organismId, strainName, sourceType, city, country, latitude, longitude } = req.body;
+    const {
+      organismId,
+      strainName,
+      isolateName,
+      strainCode,
+      biosampleAccession,
+      bioprojectAccession,
+      assemblyAccession,
+      sourceType,
+      host,
+      country,
+      state,
+      city,
+      collectionDate,
+      locationText,
+      latitude,
+      longitude,
+      genomeStatus,
+      genomeSize,
+      gcContent,
+      repoLink,
+      metadata,
+    } = req.body;
     
     const newStrain = await prisma.strain.create({
       data: {
         organismId: Number(organismId),
         strainName,
+        isolateName,
+        strainCode,
+        biosampleAccession,
+        bioprojectAccession,
+        assemblyAccession,
         sourceType,
+        host,
         city,
         country,
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
+        state,
+        collectionDate: collectionDate ? new Date(collectionDate) : undefined,
+        locationText,
+        latitude: latitude !== undefined && latitude !== "" ? parseFloat(latitude) : undefined,
+        longitude: longitude !== undefined && longitude !== "" ? parseFloat(longitude) : undefined,
+        genomeStatus,
+        genomeSize: genomeSize !== undefined && genomeSize !== "" ? Number(genomeSize) : undefined,
+        gcContent: gcContent !== undefined && gcContent !== "" ? Number(gcContent) : undefined,
+        repoLink,
+        metadata: parseJsonObject(metadata) as Prisma.InputJsonValue,
       }
     });
     

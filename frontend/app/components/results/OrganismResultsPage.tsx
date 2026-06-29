@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, RefreshCcw, ShieldAlert } from "lucide-react";
+import { BarChart3, Dna, Home, LayoutDashboard, RefreshCcw, ShieldAlert } from "lucide-react";
 import { apiPath } from "../../lib/api-client";
 import GenomeSummaryPanel from "./GenomeSummaryPanel";
 import ToolResultsTabs from "./ToolResultsTabs";
@@ -41,13 +41,41 @@ export default function OrganismResultsPage({ organismId }: { organismId: string
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-7xl px-5 py-8 lg:px-8">
-        <div className="mb-6 flex items-center justify-between">
-          <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-[#0B1B3A] shadow-sm transition hover:border-orange-300 hover:text-orange-600">
-            <ArrowLeft size={14} />
-            Dashboard
-          </Link>
+      <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="shrink-0 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 p-2 text-white shadow-lg shadow-orange-500/20">
+              <Dna size={22} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[9px] font-black uppercase tracking-widest text-orange-500">MAYA Results</p>
+              <p className="truncate text-lg font-black italic tracking-tighter text-[#0B1B3A]">
+                {results?.organism?.name || "Organism Analysis Results"}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm transition hover:border-orange-300 hover:text-orange-600">
+              <Home size={14} />
+              Home
+            </Link>
+            <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm transition hover:border-orange-300 hover:text-orange-600">
+              <LayoutDashboard size={14} />
+              Dashboard
+            </Link>
+            <a href="#genome-summary" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm transition hover:border-orange-300 hover:text-orange-600">
+              <BarChart3 size={14} />
+              Summary
+            </a>
+            <a href="#tool-results" className="inline-flex items-center gap-2 rounded-xl bg-[#0B1B3A] px-3 py-2 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-orange-500">
+              Tool Results
+            </a>
+          </div>
         </div>
+      </nav>
+
+      <div className="mx-auto max-w-7xl px-5 py-8 lg:px-8">
 
         {loading && (
           <div className="flex min-h-[70vh] flex-col items-center justify-center rounded-[32px] bg-white text-center shadow-sm">
@@ -66,8 +94,12 @@ export default function OrganismResultsPage({ organismId }: { organismId: string
 
         {!loading && !error && results && (
           <div className="space-y-8">
-            <GenomeSummaryPanel results={results} />
-            <ToolResultsTabs tools={results.tools} toolOrder={results.toolOrder} />
+            <div id="genome-summary" className="scroll-mt-28">
+              <GenomeSummaryPanel results={results} />
+            </div>
+            <div id="tool-results" className="scroll-mt-28">
+              <ToolResultsTabs tools={results.tools} toolOrder={results.toolOrder} />
+            </div>
           </div>
         )}
       </div>

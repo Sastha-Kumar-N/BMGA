@@ -19,6 +19,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/bmga?schema=public
       JWT_SECRET: change-me-in-production
+      BMGA_ADMIN_EMAIL: maya.admin@bmga.local
+      BMGA_ADMIN_PASSWORD: MAYA@Bmga#2026!Results-47
       CORS_ORIGIN: http://localhost:3000
       PORT: 3001
     ports:

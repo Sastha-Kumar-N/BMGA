@@ -11,14 +11,23 @@ import { apiPath } from '../lib/api-client';
 // Theme Colors
 const COLORS = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#ef4444'];
 
-export default function PlatformAnalytics({ strains }: { strains: any[] }) {
-  const [gcData, setGcData] = useState([]);
+type PlatformStrain = {
+  city?: string | null;
+};
+
+type ChartDatum = {
+  name: string;
+  value: number;
+};
+
+export default function PlatformAnalytics({ strains }: { strains: PlatformStrain[] }) {
+  const [gcData, setGcData] = useState<ChartDatum[]>([]);
 
   // Fetch the GC Distribution from the backend
   useEffect(() => {
     fetch(apiPath('/stats/gc-distribution'))
       .then(res => res.json())
-      .then(data => setGcData(data))
+      .then((data: ChartDatum[]) => setGcData(data))
       .catch(console.error);
   }, []);
 
@@ -68,7 +77,7 @@ export default function PlatformAnalytics({ strains }: { strains: any[] }) {
               />
               <Bar dataKey="value" fill="#0B1B3A" radius={[8, 8, 0, 0]} barSize={40}>
                  {gcData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={index === 1 ? '#f97316' : '#0B1B3A'} />
+                  <Cell key={`cell-${entry.name}-${index}`} fill={index === 1 ? '#f97316' : '#0B1B3A'} />
                 ))}
               </Bar>
             </BarChart>

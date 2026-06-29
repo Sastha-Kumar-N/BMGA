@@ -3,7 +3,19 @@
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { useEffect } from 'react';
+
+type IndiaMapStrain = {
+  id: number;
+  strainName?: string | null;
+  sourceType?: string | null;
+  city?: string | null;
+  country?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  organism?: {
+    scientificName?: string | null;
+  } | null;
+};
 
 // Fix for Leaflet marker icons not showing in Next.js
 const markerIcon = new L.Icon({
@@ -13,7 +25,13 @@ const markerIcon = new L.Icon({
   iconAnchor: [12, 41],
 });
 
-export default function IndiaMap({ data }: { data: any[] }) {
+function asNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === '') return null;
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+export default function IndiaMap({ data }: { data: IndiaMapStrain[] }) {
   return (
     <div className="h-[600px] w-full rounded-3xl overflow-hidden shadow-2xl border-4 border-white">
       <MapContainer 
@@ -30,10 +48,12 @@ export default function IndiaMap({ data }: { data: any[] }) {
           attribution="Map data &copy; Google"
         />
         
-        {data?.map((strain: any) => {
+        {data?.map((strain) => {
           
           // Safely check for coordinates BEFORE returning JSX
-          if (!strain.latitude || !strain.longitude) {
+          const latitude = asNumber(strain.latitude);
+          const longitude = asNumber(strain.longitude);
+          if (latitude === null || longitude === null) {
             return null; // Skip rendering if no GPS data
           }
 
@@ -41,7 +61,7 @@ export default function IndiaMap({ data }: { data: any[] }) {
           return (
             <Marker 
               key={strain.id} 
-              position={[strain.latitude, strain.longitude]}
+              position={[latitude, longitude]}
               icon={markerIcon} 
             >
               <Popup>
@@ -56,7 +76,7 @@ export default function IndiaMap({ data }: { data: any[] }) {
                     {strain.organism?.scientificName}
                   </p>
                   <p className="text-xs text-slate-400 mt-2 border-t pt-2">
-                    📍 {strain.city}, {strain.country}
+                    Location: {strain.city || 'Unknown'}, {strain.country || 'India'}
                   </p>
                 </div>
               </Popup>

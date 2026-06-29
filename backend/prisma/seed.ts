@@ -109,7 +109,33 @@ async function ensureDemoToolRuns(organismId: number, strainId: number) {
 async function main() {
   console.log('🌱 Starting database seed...');
 
-  // 1. Ensure the demo login exists.
+  // 1. Ensure the dedicated admin login exists.
+  const adminEmail = process.env.BMGA_ADMIN_EMAIL || 'maya.admin@bmga.local';
+  const adminPassword = process.env.BMGA_ADMIN_PASSWORD || 'MAYA@Bmga#2026!Results-47';
+
+  if (adminPassword.length < 16) {
+    throw new Error('BMGA_ADMIN_PASSWORD must be at least 16 characters.');
+  }
+
+  console.log('🔐 Ensuring MAYA admin user exists...');
+  const hashedAdminPassword = await bcrypt.hash(adminPassword, 10);
+  const adminAccount = await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {
+      password: hashedAdminPassword,
+      name: 'MAYA Administrator',
+      role: UserRole.ADMIN,
+    },
+    create: {
+      email: adminEmail,
+      password: hashedAdminPassword,
+      name: 'MAYA Administrator',
+      role: UserRole.ADMIN,
+    },
+  });
+  console.log(`✅ Admin login ready: ${adminAccount.email}`);
+
+  // 2. Ensure the demo researcher login exists.
   console.log('👤 Ensuring demo user exists...');
   const hashedPassword = await bcrypt.hash('admin123', 10);
   const adminUser = await prisma.user.upsert({
@@ -128,7 +154,7 @@ async function main() {
   });
   console.log(`✅ Demo login ready: ${adminUser.email} | Password: admin123`);
 
-  // 2. Ensure the base organism exists.
+  // 3. Ensure the base organism exists.
   const organism = await prisma.organism.upsert({
     where: { scientificName: 'Pseudomonas aeruginosa' },
     update: {
@@ -157,7 +183,7 @@ async function main() {
   });
   console.log(`✅ Organism ready: ${organism.scientificName}`);
 
-  // 3. Ensure the specific strain exists.
+  // 4. Ensure the specific strain exists.
   const existingStrain = await prisma.strain.findFirst({
     where: {
       organismId: organism.id,
@@ -187,7 +213,7 @@ async function main() {
   console.log(`✅ Strain ready: ${strain.strainName}`);
   await ensureDemoToolRuns(organism.id, strain.id);
 
-  // 4. Ensure AMR alerts exist without duplicating them on every seed.
+  // 5. Ensure AMR alerts exist without duplicating them on every seed.
   const amrCount = await prisma.amrGene.count({ where: { strainId: strain.id } });
   if (amrCount === 0) {
     await prisma.amrGene.createMany({
@@ -202,7 +228,7 @@ async function main() {
     console.log(`✅ AMR genes already present`);
   }
 
-  // 5. Generate Analysis Runs for all 20 Tools only when absent.
+  // 6. Generate Analysis Runs for all 20 Tools only when absent.
   const analysisRunCount = await prisma.analysisRun.count({ where: { strainId: strain.id } });
   if (analysisRunCount > 0) {
     console.log(`✅ Pipeline results already present`);

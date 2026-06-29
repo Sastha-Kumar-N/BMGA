@@ -127,27 +127,27 @@ declare module "leaflet" {
     remove(): this;
   }
 
-  export class LayerGroup<T = unknown> extends Layer {
+  export class LayerGroup extends Layer {
     constructor(layers?: Layer[], options?: LayerOptions);
     addLayer(layer: Layer): this;
     removeLayer(layer: Layer): this;
   }
 
-  export class FeatureGroup<T = unknown> extends LayerGroup<T> {}
+  export class FeatureGroup extends LayerGroup {}
   export class Path extends Layer {}
-  export class CircleMarker<T = unknown> extends Path {
+  export class CircleMarker extends Path {
     constructor(latlng: LatLngExpression, options?: CircleMarkerOptions);
   }
-  export class Circle<T = unknown> extends CircleMarker<T> {}
-  export class Polyline<T = unknown, P = unknown> extends Path {
+  export class Circle extends CircleMarker {}
+  export class Polyline extends Path {
     constructor(latlngs: LatLngExpression[] | LatLngExpression[][], options?: PolylineOptions);
   }
-  export class Polygon<T = unknown> extends Polyline<T> {}
-  export class Rectangle<T = unknown> extends Polygon<T> {
+  export class Polygon extends Polyline {}
+  export class Rectangle extends Polygon {
     constructor(bounds: LatLngBoundsExpression, options?: PathOptions);
   }
-  export class GeoJSON<T = unknown, G = unknown> extends FeatureGroup<T> {
-    constructor(data?: G, options?: GeoJSONOptions);
+  export class GeoJSON extends FeatureGroup {
+    constructor(data?: unknown, options?: GeoJSONOptions);
   }
 
   export interface GeoJSONOptions extends LayerOptions {
@@ -161,7 +161,7 @@ declare module "leaflet" {
     remove(): this;
   }
 
-  export class Marker<T = unknown> extends Layer {
+  export class Marker extends Layer {
     constructor(latlng: LatLngExpression, options?: MarkerOptions);
   }
 
