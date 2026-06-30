@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useSession } from 'next-auth/react';
+import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -15,6 +15,7 @@ import {
   Dna,
   FlaskConical,
   Leaf,
+  LogOut,
   Mail,
   MapPin,
   Microscope,
@@ -67,6 +68,15 @@ const EMPTY_SUMMARY: SummaryData = {
   recentStrains: [],
   recentAmr: [],
 };
+
+const navItems = [
+  { label: 'Home', href: '#home' },
+  { label: 'Analysis', href: '#analysis' },
+  { label: 'Our Projects', href: '#projects' },
+  { label: 'Blog', href: '/blog' },
+  { label: 'Team', href: '#team' },
+  { label: 'Contact Us', href: '#contact' },
+];
 
 const workflowSteps: Array<{
   title: string;
@@ -304,6 +314,55 @@ export default function HomePage() {
 
   return (
     <main id="home" className="min-h-screen bg-white text-[#0B1B3A] selection:bg-orange-500/20">
+      <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0B1B3A]/95 text-white shadow-2xl shadow-[#0B1B3A]/10 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-5 py-4 md:px-8">
+          <Link href="#home" className="flex items-center gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-500 text-white shadow-lg shadow-orange-500/25">
+              <Dna size={23} />
+            </span>
+            <span>
+              <span className="block text-xl font-black tracking-tight">BMGA</span>
+              <span className="block text-[9px] font-black uppercase tracking-widest text-orange-300">Bharat Genome Atlas</span>
+            </span>
+          </Link>
+
+          <div className="hidden items-center gap-7 text-sm font-black lg:flex">
+            {navItems.map((item) => (
+              <Link key={item.href} href={item.href} className="text-slate-200 transition hover:text-orange-300">
+                {item.label}
+              </Link>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Link href="/dashboard" className="hidden rounded-xl bg-orange-500 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-500/20 transition hover:bg-orange-400 sm:inline-flex">
+              Explore Dashboard
+            </Link>
+            {session ? (
+              <>
+                <Link href="/account" className="inline-flex items-center gap-2 rounded-xl border border-white/20 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:border-orange-300 hover:text-orange-300">
+                  <UsersRound size={15} />
+                  Account
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="hidden items-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:border-red-300 hover:bg-red-500/10 hover:text-red-200 sm:inline-flex"
+                >
+                  <LogOut size={15} />
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <Link href="/login" className="inline-flex items-center gap-2 rounded-xl border border-white/20 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:border-orange-300 hover:text-orange-300">
+                <UsersRound size={15} />
+                Login
+              </Link>
+            )}
+          </div>
+        </div>
+      </nav>
+
       <section className="relative overflow-hidden bg-[#0B1B3A] text-white">
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.055)_1px,transparent_1px)] bg-[size:54px_54px]" />
         <div className="absolute inset-x-0 bottom-0 h-1.5">

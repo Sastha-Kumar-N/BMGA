@@ -583,34 +583,6 @@ app.post('/api/blog-posts', requireRole([UserRole.CONTRIBUTOR, UserRole.MODERATO
   }
 });
 
-app.get('/api/review/pending-content', requireRole([UserRole.MODERATOR, UserRole.ADMIN]), async (_req: AuthenticatedRequest, res: Response) => {
-  try {
-    const [organismUploads, blogPosts] = await Promise.all([
-      prisma.organismUpload.findMany({
-        where: { status: ApprovalStatus.PENDING },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        include: {
-          submittedBy: { select: { id: true, name: true, email: true, role: true, affiliation: true } },
-        },
-      }),
-      prisma.blogPost.findMany({
-        where: { status: ApprovalStatus.PENDING },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        include: {
-          author: { select: { id: true, name: true, email: true, role: true, affiliation: true } },
-        },
-      }),
-    ]);
-
-    res.json({ organismUploads, blogPosts });
-  } catch (error) {
-    console.error("Moderator Pending Content Fetch Error:", error);
-    res.status(500).json({ error: "Failed to fetch pending content" });
-  }
-});
-
 // ─── DASHBOARD SUMMARY ───────────────────────────────────────────────────────
 
 app.get('/api/dashboard/summary', async (req: Request, res: Response) => {

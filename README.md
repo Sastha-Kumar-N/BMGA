@@ -122,31 +122,6 @@ The optional demo researcher account password is controlled by `BMGA_DEMO_PASSWO
 
 Change these values in production before deploying.
 
-## Global Navigation Bar
-
-The website-wide navigation is centralized in:
-
-```text
-frontend/app/components/GlobalNavbar.tsx
-```
-
-It is mounted once from the root layout:
-
-```text
-frontend/app/layout.tsx
-```
-
-Any future navbar change should be made in `GlobalNavbar.tsx`; it will automatically appear across all pages. The navbar uses NextAuth session state to switch between public, logged-in, admin, moderator, and contributor links. It also highlights the active page with `usePathname()` and tracks the organism registry hash target on the dashboard.
-
-Protected routes still rely on middleware and backend authorization:
-
-```text
-frontend/proxy.ts
-backend/index.ts
-```
-
-Navbar visibility is only a UI convenience, not the security boundary.
-
 ## Result Import Folder Structure
 
 The importer expects one folder per organism. The folder name can be an existing numeric organism id or a scientific/display name.

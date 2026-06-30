@@ -7,9 +7,6 @@ export default withAuth({
       if (pathname.startsWith("/admin")) {
         return token?.role === "ADMIN";
       }
-      if (pathname.startsWith("/review")) {
-        return token?.role === "MODERATOR" || token?.role === "ADMIN";
-      }
       return Boolean(token);
     },
   },
@@ -19,5 +16,5 @@ export default withAuth({
 });
 
 export const config = {
-  matcher: ["/admin/:path*", "/account/:path*", "/submit-organism/:path*", "/blog/create/:path*", "/review/:path*"],
+  matcher: ["/admin/:path*", "/account/:path*", "/submit-organism/:path*", "/blog/create/:path*"],
 };
