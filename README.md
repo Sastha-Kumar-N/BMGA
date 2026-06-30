@@ -36,6 +36,117 @@ The frontend calls these through its existing proxy:
 /api/backend/organisms/:id/results
 ```
 
+## Accounts, Review Workflow, And Admin Cockpit
+
+The platform now includes user accounts, role-based access, organism submission review, and blog approval.
+
+```text
+Public/auth pages:
+/register
+/login
+/blog
+
+Signed-in pages:
+/account
+/submit-organism
+/blog/create
+
+Admin-only pages:
+/admin
+/admin/cockpit
+/admin/users
+/admin/uploads
+/admin/blogs
+```
+
+Key API routes:
+
+```text
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/me
+POST /api/organism-uploads
+GET  /api/me/uploads
+POST /api/blog-posts
+GET  /api/me/blog-posts
+GET  /api/blog-posts
+
+GET    /api/admin/users
+PATCH  /api/admin/users/:id
+GET    /api/admin/organism-uploads
+PATCH  /api/admin/organism-uploads/:id
+POST   /api/admin/organism-uploads/:id/approve
+POST   /api/admin/organism-uploads/:id/reject
+DELETE /api/admin/organism-uploads/:id
+GET    /api/admin/blog-posts
+PATCH  /api/admin/blog-posts/:id
+POST   /api/admin/blog-posts/:id/approve
+POST   /api/admin/blog-posts/:id/reject
+DELETE /api/admin/blog-posts/:id
+```
+
+User passwords are stored as bcrypt hashes in the existing `User.password` database column, exposed in Prisma as `passwordHash`. New user organism uploads are saved as `PENDING` in `OrganismUpload`. Admin approval publishes the record into the public `Organism` and `Strain` tables, so the existing dashboard and India atlas automatically pick it up. Rejected records remain hidden from the public database. Blog posts follow the same `PENDING`, `APPROVED`, `REJECTED` workflow.
+
+Roles shown in the UI:
+
+```text
+Normal User -> UserRole.STUDENT
+Contributor -> UserRole.CONTRIBUTOR
+Moderator -> UserRole.MODERATOR
+Admin -> UserRole.ADMIN
+```
+
+Affiliations:
+
+```text
+INDUSTRY
+ACADEMIC
+RESEARCH
+```
+
+The first admin account is seeded from:
+
+```text
+BMGA_ADMIN_EMAIL
+BMGA_ADMIN_PASSWORD
+```
+
+The default local Docker seed is:
+
+```text
+Email: maya.admin@bmga.local
+Password: MAYA@Bmga#2026!Results-47
+```
+
+The optional demo researcher account password is controlled by `BMGA_DEMO_PASSWORD`.
+
+Change these values in production before deploying.
+
+## Global Navigation Bar
+
+The website-wide navigation is centralized in:
+
+```text
+frontend/app/components/GlobalNavbar.tsx
+```
+
+It is mounted once from the root layout:
+
+```text
+frontend/app/layout.tsx
+```
+
+Any future navbar change should be made in `GlobalNavbar.tsx`; it will automatically appear across all pages. The navbar uses NextAuth session state to switch between public, logged-in, admin, moderator, and contributor links. It also highlights the active page with `usePathname()` and tracks the organism registry hash target on the dashboard.
+
+Protected routes still rely on middleware and backend authorization:
+
+```text
+frontend/proxy.ts
+backend/index.ts
+```
+
+Navbar visibility is only a UI convenience, not the security boundary.
+
 ## Result Import Folder Structure
 
 The importer expects one folder per organism. The folder name can be an existing numeric organism id or a scientific/display name.

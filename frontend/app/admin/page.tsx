@@ -333,6 +333,9 @@ export default function AdminPortal() {
             <p className="mt-2 text-sm font-medium text-slate-400">Private ingestion console for organisms, genome metadata, and MAYA result outputs.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <Link href="/admin/cockpit" className="rounded-2xl border border-orange-400/30 bg-orange-500/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-orange-200 hover:bg-orange-500/20">
+              Admin Cockpit
+            </Link>
             <Link href="/dashboard" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-200 hover:bg-white/10">
               Dashboard
             </Link>

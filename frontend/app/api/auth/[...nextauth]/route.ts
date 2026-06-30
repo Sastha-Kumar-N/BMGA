@@ -7,8 +7,10 @@ type LoginResponse = {
   token?: string;
   user?: {
     id: string;
+    email?: string;
     name?: string | null;
     role?: string;
+    affiliation?: string;
   };
 };
 
@@ -40,8 +42,9 @@ const authOptions: NextAuthOptions = {
           return {
             id: data.user.id,
             name: data.user.name,
-            email: credentials.email,
+            email: data.user.email || credentials.email,
             role: data.user.role,
+            affiliation: data.user.affiliation,
             accessToken: data.token,
           };
         }
@@ -52,15 +55,19 @@ const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
+        token.id = user.id;
         token.accessToken = user.accessToken;
         token.role = user.role;
+        token.affiliation = user.affiliation;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
+        session.user.id = token.id;
         session.user.accessToken = token.accessToken;
         session.user.role = token.role;
+        session.user.affiliation = token.affiliation;
       }
       return session;
     }

@@ -122,13 +122,13 @@ async function main() {
   const adminAccount = await prisma.user.upsert({
     where: { email: adminEmail },
     update: {
-      password: hashedAdminPassword,
+      passwordHash: hashedAdminPassword,
       name: 'MAYA Administrator',
       role: UserRole.ADMIN,
     },
     create: {
       email: adminEmail,
-      password: hashedAdminPassword,
+      passwordHash: hashedAdminPassword,
       name: 'MAYA Administrator',
       role: UserRole.ADMIN,
     },
@@ -137,22 +137,27 @@ async function main() {
 
   // 2. Ensure the demo researcher login exists.
   console.log('👤 Ensuring demo user exists...');
-  const hashedPassword = await bcrypt.hash('admin123', 10);
+  const demoPassword = process.env.BMGA_DEMO_PASSWORD || 'BMGA@Demo#2026!Research-19';
+  if (demoPassword.length < 10) {
+    throw new Error('BMGA_DEMO_PASSWORD must be at least 10 characters.');
+  }
+
+  const hashedPassword = await bcrypt.hash(demoPassword, 10);
   const adminUser = await prisma.user.upsert({
     where: { email: 'admin@genomics.com' },
     update: {
-      password: hashedPassword,
+      passwordHash: hashedPassword,
       name: 'System Admin',
       role: UserRole.RESEARCHER,
     },
     create: {
       email: 'admin@genomics.com',
-      password: hashedPassword,
+      passwordHash: hashedPassword,
       name: 'System Admin',
       role: UserRole.RESEARCHER,
     },
   });
-  console.log(`✅ Demo login ready: ${adminUser.email} | Password: admin123`);
+  console.log(`✅ Demo login ready: ${adminUser.email}`);
 
   // 3. Ensure the base organism exists.
   const organism = await prisma.organism.upsert({

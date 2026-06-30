@@ -12,6 +12,20 @@ enum UserRole {
   RESEARCHER
   INDUSTRY
   OTHER
+  CONTRIBUTOR
+  MODERATOR
+}
+
+enum UserAffiliation {
+  INDUSTRY
+  ACADEMIC
+  RESEARCH
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum ToolRunStatus {
@@ -24,12 +38,19 @@ enum ToolRunStatus {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      UserRole @default(STUDENT)
-  createdAt DateTime @default(now())
+  id                       String           @id @default(uuid())
+  email                    String           @unique
+  passwordHash             String           @map("password")
+  name                     String
+  affiliation              UserAffiliation  @default(RESEARCH)
+  role                     UserRole         @default(STUDENT)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+  organismUploads          OrganismUpload[] @relation("UserOrganismUploads")
+  reviewedOrganismUploads  OrganismUpload[] @relation("ReviewedOrganismUploads")
+  blogPosts                BlogPost[]       @relation("UserBlogPosts")
+  reviewedBlogPosts        BlogPost[]       @relation("ReviewedBlogPosts")
+  adminLogs                AdminLog[]       @relation("AdminLogs")
 }
 
 model Organism {
@@ -96,6 +117,96 @@ model Strain {
   @@index([country])
   @@index([state])
   @@index([city])
+}
+
+model OrganismUpload {
+  id                    String         @id @default(uuid())
+  submittedById          String
+  reviewedById           String?
+  status                ApprovalStatus @default(PENDING)
+  reviewNote            String?
+  scientificName         String
+  displayName            String?
+  taxonomyId             Int?
+  domain                 String?
+  phylum                 String?
+  className              String?
+  orderName              String?
+  family                 String?
+  genus                  String?
+  species                String?
+  description            String?
+  strainName             String
+  isolateName            String?
+  strainCode             String?
+  biosampleAccession     String?
+  bioprojectAccession    String?
+  assemblyAccession      String?
+  sourceType             String?
+  host                   String?
+  country                String?
+  state                  String?
+  city                   String?
+  collectionDate         DateTime?
+  locationText           String?
+  latitude               Float?
+  longitude              Float?
+  genomeStatus           String?
+  genomeSize             Int?
+  gcContent              Decimal?       @db.Decimal(5, 2)
+  repoLink               String?
+  metadata               Json?
+  publishedOrganismId    Int?
+  publishedStrainId      Int?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  reviewedAt             DateTime?
+
+  submittedBy            User           @relation("UserOrganismUploads", fields: [submittedById], references: [id], onDelete: Cascade)
+  reviewedBy             User?          @relation("ReviewedOrganismUploads", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([submittedById])
+  @@index([reviewedById])
+  @@index([status])
+  @@index([scientificName])
+  @@index([strainName])
+}
+
+model BlogPost {
+  id            String         @id @default(uuid())
+  title         String
+  content       String
+  authorId      String
+  reviewedById  String?
+  status        ApprovalStatus @default(PENDING)
+  reviewNote    String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  reviewedAt    DateTime?
+
+  author        User           @relation("UserBlogPosts", fields: [authorId], references: [id], onDelete: Cascade)
+  reviewedBy    User?          @relation("ReviewedBlogPosts", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([authorId])
+  @@index([reviewedById])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AdminLog {
+  id          String   @id @default(uuid())
+  adminId     String?
+  action      String
+  targetType  String
+  targetId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  admin       User?    @relation("AdminLogs", fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([adminId])
+  @@index([targetType])
+  @@index([createdAt])
 }
 
 model Assembly {

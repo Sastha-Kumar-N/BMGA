@@ -419,7 +419,7 @@ export default function Dashboard() {
             allAlerts={summaryData.recentAmr}
           />
 
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
+          <section id="organism-registry" className="grid scroll-mt-24 gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-col gap-3 border-b border-slate-100 px-6 py-5 md:flex-row md:items-center md:justify-between">
                 <div>

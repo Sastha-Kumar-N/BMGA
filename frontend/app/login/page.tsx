@@ -2,6 +2,7 @@
 import { signIn } from "next-auth/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 /*
 Colour scheme from the image:
@@ -34,7 +35,7 @@ export default function LoginPage() {
     setLoading(false);
 
     if (result?.ok) {
-      router.push("/dashboard");
+      router.push("/account");
     } else {
       setError("Invalid credentials! Please try again.");
     }
@@ -62,16 +63,16 @@ export default function LoginPage() {
           {/* Simple logo */}
           <svg viewBox="0 0 40 40" className="mb-2" width={48} height={48}>
             <circle cx="20" cy="20" r="20" fill="#ff9200" />
-            <text x="50%" y="57%" textAnchor="middle" fill="#fff" fontSize="16" fontWeight="bold" fontFamily="Arial">RH</text>
+            <text x="50%" y="57%" textAnchor="middle" fill="#fff" fontSize="13" fontWeight="bold" fontFamily="Arial">BG</text>
           </svg>
           <h1
             className="text-[2rem] font-extrabold text-center mb-2"
             style={{ color: "#313e6a", fontFamily: "Inter, Arial" }}
           >
-            Researcher Login
+            BMGA Account Login
           </h1>
           <p className="text-[#313e6a]/70 text-center text-sm max-w-xs">
-            Please sign in to access your Research Hub dashboard.
+            Sign in to submit organism metadata, write blog posts, or manage admin review workflows.
           </p>
         </div>
 
@@ -165,6 +166,12 @@ export default function LoginPage() {
               "Sign In"
             )}
           </button>
+          <p className="text-center text-sm font-semibold text-[#313e6a]/70">
+            New to BMGA?{" "}
+            <Link href="/register" className="font-extrabold text-[#ff9200] hover:text-[#0f7ffe]">
+              Create an account
+            </Link>
+          </p>
         </div>
       </form>
     </main>
