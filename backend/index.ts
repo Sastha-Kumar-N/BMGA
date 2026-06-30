@@ -10,26 +10,88 @@ import fs from 'fs';
 import path from 'path';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
+import { AsyncLocalStorage } from 'async_hooks';
+import { createHash, randomUUID } from 'crypto';
 import { getOrganismById } from './services/organismService';
 import { getOrganismResults, getOrganismToolResult, getToolOutputFile, saveNormalizedToolRun } from './services/resultService';
 import { normalizeToolName } from './services/resultsParsers/toolDefinitions';
-// --- Database Configuration ---
+// --- Runtime Configuration --------------------------------------------------
+const isProduction = process.env.NODE_ENV === 'production';
+const allowInsecureDevSecrets = process.env.ALLOW_INSECURE_DEV_SECRETS === 'true';
+const APP_NAME = process.env.APP_NAME || 'bgdb';
+const APP_VERSION = process.env.APP_VERSION || process.env.npm_package_version || '0.0.0';
+const LOG_LEVEL = process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug');
+const ENABLE_REQUEST_LOGGING = process.env.ENABLE_REQUEST_LOGGING !== 'false';
+const PORT = Number(process.env.PORT || 3001);
+const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || '1mb';
+const MAX_IMPORT_FILE_BYTES = Number(process.env.MAX_IMPORT_FILE_BYTES || 5 * 1024 * 1024);
+const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_ROOT || path.join(process.cwd(), 'uploads'));
+
+const TRUSTED_DEV_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3001',
+];
+
+const UNSAFE_SECRET_MARKERS = [
+  '',
+  'fallback_secret',
+  'change-me',
+  'change-me-in-production',
+  'dev-secret-change-me',
+  'secret',
+  'password',
+];
+
+function csvEnv(name: string) {
+  return (process.env[name] || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function numberEnv(name: string, fallback: number) {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function validateSecret(name: string, value: string | undefined, minimumLength = 32) {
+  const trimmed = value?.trim() || '';
+  const unsafe = UNSAFE_SECRET_MARKERS.includes(trimmed) || /^dev-local-/i.test(trimmed);
+  if (isProduction && !allowInsecureDevSecrets && (trimmed.length < minimumLength || unsafe)) {
+    throw new Error(`${name} must be set to a strong non-placeholder value in production.`);
+  }
+  if (!trimmed) {
+    throw new Error(`${name} is required to start the API server.`);
+  }
+  return trimmed;
+}
+
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error('DATABASE_URL is required to start the API server.');
 }
 
-const pool = new Pool({ connectionString });
+const JWT_SECRET = validateSecret('JWT_SECRET', process.env.JWT_SECRET, 32);
+const configuredOrigins = [...csvEnv('CORS_ORIGIN'), ...csvEnv('FRONTEND_URL')];
+if (isProduction && !allowInsecureDevSecrets && configuredOrigins.length === 0) {
+  throw new Error('CORS_ORIGIN or FRONTEND_URL must be set in production.');
+}
+const allowedOrigins = new Set(isProduction ? configuredOrigins : [...configuredOrigins, ...TRUSTED_DEV_ORIGINS]);
+const adminAllowedIps = new Set(csvEnv('ADMIN_ALLOWED_IPS'));
+const adminEmailDomains = new Set(csvEnv('ADMIN_EMAIL_DOMAINS').map((domain) => domain.toLowerCase()));
+
+const pool = new Pool({
+  connectionString,
+  max: numberEnv('DB_POOL_MAX', 10),
+  idleTimeoutMillis: numberEnv('DB_IDLE_TIMEOUT_MS', 30_000),
+  connectionTimeoutMillis: numberEnv('DB_CONNECTION_TIMEOUT_MS', 10_000),
+});
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 const app = express();
-
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
-const PORT = Number(process.env.PORT || 3001);
-const allowedOrigins = process.env.CORS_ORIGIN
-  ?.split(',')
-  .map(origin => origin.trim())
-  .filter(Boolean);
+app.disable('x-powered-by');
 
 function parseNumericParam(value: string | string[] | undefined) {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -42,6 +104,7 @@ function parseStringParam(value: string | string[] | undefined) {
 }
 
 type AuthenticatedRequest = Request & {
+  requestId?: string;
   user?: {
     userId: string;
     role: UserRole;
@@ -51,11 +114,195 @@ type AuthenticatedRequest = Request & {
   };
 };
 
+type RequestContext = {
+  requestId: string;
+  ipAddress: string;
+  userAgent?: string;
+  userId?: string;
+  userEmail?: string;
+  userRole?: UserRole;
+};
+
+const requestContext = new AsyncLocalStorage<RequestContext>();
+
+function getClientIp(req: Request) {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const firstForwardedIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor?.split(',')[0];
+  return (firstForwardedIp || req.ip || req.socket.remoteAddress || 'unknown').trim();
+}
+
+function currentContext() {
+  return requestContext.getStore();
+}
+
+function hashIdentifier(value: string) {
+  return createHash('sha256').update(value.toLowerCase()).digest('hex').slice(0, 24);
+}
+
+function logEvent(level: 'debug' | 'info' | 'warn' | 'error', message: string, fields: Record<string, unknown> = {}) {
+  if (level === 'debug' && LOG_LEVEL !== 'debug') return;
+
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level,
+    app: APP_NAME,
+    message,
+    ...fields,
+  };
+
+  if (isProduction) {
+    console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](JSON.stringify(payload));
+  } else {
+    console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](`[${payload.timestamp}] ${level.toUpperCase()} ${message}`, fields);
+  }
+}
+
+function safeErrorMessage(error: unknown, fallback: string) {
+  if (isProduction) return fallback;
+  return error instanceof Error ? error.message : fallback;
+}
+
+function securityHeaders(req: Request, res: Response, next: NextFunction) {
+  const csp = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "img-src 'self' data: https:",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "connect-src 'self'",
+    "form-action 'self'",
+  ].join('; ');
+
+  res.setHeader('Content-Security-Policy', csp);
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('X-Request-ID', (req as AuthenticatedRequest).requestId || currentContext()?.requestId || randomUUID());
+  if (isProduction) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+}
+
+function requestContextMiddleware(req: Request, res: Response, next: NextFunction) {
+  const incomingRequestId = Array.isArray(req.headers['x-request-id']) ? req.headers['x-request-id'][0] : req.headers['x-request-id'];
+  const requestId = incomingRequestId && /^[A-Za-z0-9_.:-]{8,128}$/.test(incomingRequestId) ? incomingRequestId : randomUUID();
+  const context: RequestContext = {
+    requestId,
+    ipAddress: getClientIp(req),
+    userAgent: req.headers['user-agent'],
+  };
+
+  (req as AuthenticatedRequest).requestId = requestId;
+  requestContext.run(context, () => next());
+}
+
+function requestLogger(req: Request, res: Response, next: NextFunction) {
+  if (!ENABLE_REQUEST_LOGGING) return next();
+  const startedAt = Date.now();
+
+  res.on('finish', () => {
+    const context = currentContext();
+    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    logEvent(level, 'http_request', {
+      requestId: context?.requestId,
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+    });
+  });
+
+  next();
+}
+
+type RateLimitBucket = {
+  count: number;
+  resetAt: number;
+};
+
+const rateLimitBuckets = new Map<string, RateLimitBucket>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateLimitBuckets.entries()) {
+    if (bucket.resetAt <= now) {
+      rateLimitBuckets.delete(key);
+    }
+  }
+}, 60_000).unref();
+
+function rateLimit(options: {
+  name: string;
+  windowMs: number;
+  max: number;
+  key: (req: Request) => string;
+}) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const now = Date.now();
+    const key = `${options.name}:${options.key(req)}`;
+    const bucket = rateLimitBuckets.get(key);
+
+    if (!bucket || bucket.resetAt <= now) {
+      rateLimitBuckets.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+
+    bucket.count += 1;
+    if (bucket.count > options.max) {
+      const retryAfterSeconds = Math.ceil((bucket.resetAt - now) / 1000);
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      logEvent('warn', 'rate_limit_exceeded', {
+        requestId: currentContext()?.requestId,
+        limiter: options.name,
+        path: req.path,
+        ipAddress: currentContext()?.ipAddress,
+      });
+      return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+    }
+
+    next();
+  };
+}
+
+const defaultRateLimitWindowMs = numberEnv('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000);
+const loginRateLimiter = rateLimit({
+  name: 'login',
+  windowMs: defaultRateLimitWindowMs,
+  max: numberEnv('LOGIN_RATE_LIMIT_MAX', 10),
+  key: (req) => `${getClientIp(req)}:${hashIdentifier(normalizedEmail(req.body?.email) || 'unknown')}`,
+});
+const contactRateLimiter = rateLimit({
+  name: 'contact',
+  windowMs: defaultRateLimitWindowMs,
+  max: numberEnv('CONTACT_RATE_LIMIT_MAX', 5),
+  key: (req) => `${getClientIp(req)}:${hashIdentifier(normalizedEmail(req.body?.email) || 'unknown')}`,
+});
+const adminRateLimiter = rateLimit({
+  name: 'admin',
+  windowMs: defaultRateLimitWindowMs,
+  max: numberEnv('ADMIN_RATE_LIMIT_MAX', 300),
+  key: (req) => `${getClientIp(req)}:${req.path}`,
+});
+const importRateLimiter = rateLimit({
+  name: 'import',
+  windowMs: defaultRateLimitWindowMs,
+  max: numberEnv('IMPORT_RATE_LIMIT_MAX', 40),
+  key: (req) => `${getClientIp(req)}:${req.path}`,
+});
+
 async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
   if (!token) {
+    await writeAdminLog(undefined, "AUTH_REQUIRED", "Auth", undefined, { result: "failure", statusCode: 401, path: req.path });
     return res.status(401).json({ error: "Authentication required" });
   }
 
@@ -81,17 +328,48 @@ async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextF
       name: user.name,
       affiliation: user.affiliation,
     };
+    const context = currentContext();
+    if (context) {
+      context.userId = user.id;
+      context.userEmail = user.email;
+      context.userRole = user.role;
+    }
     next();
   } catch {
+    await writeAdminLog(undefined, "AUTH_INVALID_TOKEN", "Auth", undefined, { result: "failure", statusCode: 401, path: req.path });
     return res.status(401).json({ error: "Invalid or expired token" });
   }
+}
+
+function adminAccessAllowed(req: AuthenticatedRequest) {
+  if (!req.user || req.user.role !== UserRole.ADMIN) return true;
+  const ipAllowed = adminAllowedIps.size === 0 || adminAllowedIps.has(getClientIp(req));
+  const domain = req.user.email?.split('@')[1]?.toLowerCase();
+  const domainAllowed = adminEmailDomains.size === 0 || (domain ? adminEmailDomains.has(domain) : false);
+
+  return ipAllowed && domainAllowed;
 }
 
 function requireRole(roles: UserRole[]) {
   return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     await requireAuth(req, res, () => {
       if (!req.user || !roles.includes(req.user.role)) {
+        void writeAdminLog(req.user?.userId, "PERMISSION_DENIED", "Auth", undefined, {
+          result: "failure",
+          requiredRoles: roles,
+          actorRole: req.user?.role,
+          path: req.path,
+          statusCode: 403,
+        });
         return res.status(403).json({ error: `${roles.join(" or ")} role required` });
+      }
+      if (roles.includes(UserRole.ADMIN) && !adminAccessAllowed(req)) {
+        void writeAdminLog(req.user.userId, "ADMIN_ACCESS_POLICY_DENIED", "Auth", undefined, {
+          result: "failure",
+          path: req.path,
+          statusCode: 403,
+        });
+        return res.status(403).json({ error: "Admin access is not allowed from this context" });
       }
       next();
     });
@@ -136,12 +414,19 @@ const ASSIGNABLE_ROLES = new Set<UserRole>([
 
 function textValue(value: unknown, maxLength = 500) {
   if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
+  const trimmed = value
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/[<>]/g, "")
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   return trimmed ? trimmed.slice(0, maxLength) : undefined;
 }
 
 function sanitizeContactText(value: unknown, maxLength = 500, preserveNewlines = false) {
-  const raw = textValue(value, maxLength);
+  if (typeof value !== "string") return undefined;
+  const raw = value.trim().slice(0, maxLength);
   if (!raw) return undefined;
 
   const withoutMarkup = raw
@@ -382,18 +667,46 @@ function strainPublicationData(upload: {
 
 async function writeAdminLog(adminId: string | undefined, action: string, targetType: string, targetId?: string, metadata: Record<string, unknown> = {}) {
   try {
+    const context = currentContext();
     await prisma.adminLog.create({
       data: {
         adminId,
         action,
         targetType,
         targetId,
-        metadata: metadata as Prisma.InputJsonValue,
+        metadata: {
+          result: metadata.result || "success",
+          requestId: context?.requestId,
+          ipAddress: context?.ipAddress,
+          userAgent: context?.userAgent,
+          actorEmail: context?.userEmail,
+          actorRole: context?.userRole,
+          ...metadata,
+        } as Prisma.InputJsonValue,
       },
     });
   } catch (error) {
-    console.error("Admin log write failed:", error);
+    logEvent('error', "admin_log_write_failed", {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, "Admin log write failed"),
+    });
   }
+}
+
+function validateImportFile(fileName: unknown, fileContent: unknown) {
+  const normalizedFileName = textValue(fileName, 240) || "results.tsv";
+  const extension = path.extname(normalizedFileName).toLowerCase();
+  const allowedExtensions = new Set(['.tsv', '.csv', '.json', '.txt']);
+  if (!allowedExtensions.has(extension)) {
+    return { error: "Unsupported import file type. Use TSV, CSV, JSON, or TXT." as const };
+  }
+  if (typeof fileContent !== "string" || !fileContent.trim()) {
+    return { error: "No file content provided." as const };
+  }
+  if (Buffer.byteLength(fileContent, 'utf8') > MAX_IMPORT_FILE_BYTES) {
+    return { error: "Import file is too large." as const };
+  }
+  return { fileName: normalizedFileName, fileContent };
 }
 
 function parseDelimitedFile(fileContent: string, fileName: string) {
@@ -424,27 +737,51 @@ function parseDelimitedFile(fileContent: string, fileName: string) {
 function saveUploadedResultFile(organismId: number, toolName: string, fileName: string, fileContent: string) {
   const safeTool = normalizeToolName(toolName).replace(/[^a-z0-9_]/gi, '_');
   const safeFile = fileName.replace(/[^a-z0-9_.-]/gi, '_');
-  const uploadDir = path.resolve(process.cwd(), 'uploads', 'maya-results', String(organismId), safeTool);
+  const uploadDir = path.resolve(UPLOAD_ROOT, 'maya-results', String(organismId), safeTool);
+  const relativeUploadDir = path.relative(UPLOAD_ROOT, uploadDir);
+  if (relativeUploadDir.startsWith('..') || path.isAbsolute(relativeUploadDir)) {
+    throw new Error("Invalid upload path");
+  }
   fs.mkdirSync(uploadDir, { recursive: true });
   const outputPath = path.join(uploadDir, `${Date.now()}-${safeFile}`);
   fs.writeFileSync(outputPath, fileContent, 'utf8');
   return outputPath;
 }
 
+app.set('trust proxy', process.env.TRUST_PROXY || 1);
+app.use(requestContextMiddleware);
+app.use(securityHeaders);
 app.use(cors({
-  origin: allowedOrigins?.length ? allowedOrigins : true,
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (origin && allowedOrigins.has(origin)) return callback(null, true);
+    return callback(new Error('CORS origin not allowed'));
+  },
   credentials: true,
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+app.use(requestLogger);
 
-app.get('/api/health', async (_req: Request, res: Response) => {
+app.get(['/health', '/api/health'], async (_req: Request, res: Response) => {
+  res.json({ status: 'ok' });
+});
+
+app.get(['/ready', '/api/ready'], async (_req: Request, res: Response) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: 'ok' });
   } catch (error) {
-    console.error('Health check failed:', error);
-    res.status(503).json({ status: 'error', error: 'Database unavailable' });
+    logEvent('error', 'readiness_check_failed', { error: safeErrorMessage(error, 'Database unavailable') });
+    res.status(503).json({ status: 'error' });
   }
+});
+
+app.get(['/version', '/api/version'], (_req: Request, res: Response) => {
+  res.json({
+    app: APP_NAME,
+    version: APP_VERSION,
+    environment: process.env.NODE_ENV || 'development',
+  });
 });
 
 // ─── AUTHENTICATION ROUTES ──────────────────────────────────────────────────
@@ -490,7 +827,7 @@ async function registerUser(req: Request, res: Response) {
 app.post('/api/auth/register', registerUser);
 app.post('/api/auth/signup', registerUser);
 
-app.post('/api/auth/login', async (req: Request, res: Response) => {
+app.post('/api/auth/login', loginRateLimiter, async (req: Request, res: Response) => {
   try {
     const email = normalizedEmail(req.body.email);
     const { password } = req.body;
@@ -500,12 +837,21 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      await writeAdminLog(user?.id, "LOGIN_FAILED", "Auth", email ? hashIdentifier(email) : undefined, {
+        result: "failure",
+        emailHash: email ? hashIdentifier(email) : undefined,
+      });
       return res.status(401).json({ error: "Invalid email or password" });
     }
     const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+    await writeAdminLog(user.role === UserRole.ADMIN ? user.id : undefined, user.role === UserRole.ADMIN ? "ADMIN_LOGIN_SUCCESS" : "LOGIN_SUCCESS", "Auth", user.id, {
+      result: "success",
+      role: user.role,
+      emailHash: hashIdentifier(user.email),
+    });
     res.json({ token, user: publicUser(user) });
   } catch (error) {
-    console.error("Login Error:", error);
+    logEvent('error', "login_error", { requestId: currentContext()?.requestId, error: safeErrorMessage(error, "Login failed") });
     res.status(500).json({ error: "Login failed" });
   }
 });
@@ -520,7 +866,7 @@ app.get('/api/me', requireAuth, async (req: AuthenticatedRequest, res: Response)
   res.json({ user: publicUser(user), roleLabel: roleLabel(user.role) });
 });
 
-app.post('/api/contact-messages', async (req: Request, res: Response) => {
+app.post('/api/contact-messages', contactRateLimiter, async (req: Request, res: Response) => {
   try {
     const payload = buildContactMessagePayload(req.body || {});
     if ("error" in payload) {
@@ -767,6 +1113,7 @@ app.get('/api/strains', async (req: Request, res: Response) => {
   }
 });
 
+app.use('/api/admin', adminRateLimiter);
 
 app.get('/api/admin/me', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   res.json({ ok: true, user: req.user });
@@ -811,11 +1158,12 @@ app.get('/api/admin/contact-messages', requireAdmin, async (req: Request, res: R
   }
 });
 
-app.get('/api/admin/contact-messages/:id', requireAdmin, async (req: Request, res: Response) => {
+app.get('/api/admin/contact-messages/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const messageId = parseStringParam(req.params.id);
     const message = await prisma.contactMessage.findUnique({ where: { id: messageId } });
     if (!message) return res.status(404).json({ error: "Contact message not found" });
+    await writeAdminLog(req.user?.userId, "CONTACT_MESSAGE_DETAIL_READ", "ContactMessage", messageId);
     res.json(message);
   } catch (error) {
     console.error("Admin Contact Message Detail Error:", error);
@@ -1394,7 +1742,7 @@ app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: Request, 
   }
 });
 
-app.post('/api/admin/maya-results', requireAdmin, async (req: Request, res: Response) => {
+app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const {
       organismId,
@@ -1417,8 +1765,12 @@ app.post('/api/admin/maya-results', requireAdmin, async (req: Request, res: Resp
     }
 
     const rawFileName = fileName || `${normalizeToolName(toolName)}.tsv`;
-    const parsedTable = fileContent ? parseDelimitedFile(String(fileContent), rawFileName) : { columns: [] as string[], rows: [] as Record<string, unknown>[] };
-    const savedFilePath = fileContent ? saveUploadedResultFile(numericOrganismId, toolName, rawFileName, String(fileContent)) : undefined;
+    const validatedFile = fileContent ? validateImportFile(rawFileName, fileContent) : undefined;
+    if (validatedFile && "error" in validatedFile) {
+      return res.status(400).json({ error: validatedFile.error });
+    }
+    const parsedTable = validatedFile ? parseDelimitedFile(validatedFile.fileContent, validatedFile.fileName) : { columns: [] as string[], rows: [] as Record<string, unknown>[] };
+    const savedFilePath = validatedFile ? saveUploadedResultFile(numericOrganismId, toolName, validatedFile.fileName, validatedFile.fileContent) : undefined;
 
     const savedRun = await saveNormalizedToolRun(prisma, numericOrganismId, numericStrainId, {
       toolName,
@@ -1441,6 +1793,12 @@ app.post('/api/admin/maya-results', requireAdmin, async (req: Request, res: Resp
       errors: parseJsonArray(errors),
     });
 
+    await writeAdminLog(req.user?.userId, "MAYA_RESULT_IMPORTED", "ToolRun", String(savedRun.id), {
+      organismId: numericOrganismId,
+      strainId: numericStrainId,
+      toolName: normalizeToolName(toolName),
+      fileName: validatedFile?.fileName,
+    });
     res.status(201).json({ message: "MAYA result ingested", toolRunId: savedRun.id });
   } catch (error) {
     console.error("MAYA Result Ingestion Error:", error);
@@ -1448,7 +1806,7 @@ app.post('/api/admin/maya-results', requireAdmin, async (req: Request, res: Resp
   }
 });
 
-app.post('/api/organisms', requireAdmin, async (req: Request, res: Response) => {
+app.post('/api/organisms', adminRateLimiter, requireAdmin, async (req: Request, res: Response) => {
   try {
     const { scientificName, displayName, taxonomyId, domain, phylum, className, orderName, family, genus, species, description } = req.body;
     if (!scientificName) {
@@ -1528,16 +1886,17 @@ app.get('/api/strains/:id', async (req: Request, res: Response) => {
 
 // ─── DATA UPLOAD & PROCESSING ────────────────────────────────────────────────
 
-app.post('/api/upload-results', requireAdmin, async (req: Request, res: Response) => {
-  const { strainId, toolName, fileContent } = req.body;
+app.post('/api/upload-results', importRateLimiter, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const { strainId, toolName, fileContent, fileName } = req.body;
   const results: any[] = [];
 
-  if (!fileContent) {
-    return res.status(400).json({ error: "No file content provided." });
+  const validatedFile = validateImportFile(fileName || `${toolName || 'results'}.tsv`, fileContent);
+  if ("error" in validatedFile) {
+    return res.status(400).json({ error: validatedFile.error });
   }
 
   // Convert the raw text from the frontend into a readable stream for csv-parser
-  Readable.from(fileContent)
+  Readable.from(validatedFile.fileContent)
     .pipe(csv({ separator: '\t' }))
     .on('data', (data) => results.push(data))
     .on('end', async () => {
@@ -1555,9 +1914,14 @@ app.post('/api/upload-results', requireAdmin, async (req: Request, res: Response
             }
           }
         });
+        await writeAdminLog(req.user?.userId, "PIPELINE_RESULT_UPLOADED", "AnalysisRun", String(run.id), {
+          strainId,
+          toolName,
+          fileName: validatedFile.fileName,
+        });
         res.json({ message: "Analysis run and results recorded", id: run.id });
       } catch (err) {
-        console.error("Upload Error:", err);
+        logEvent('error', "upload_error", { requestId: currentContext()?.requestId, error: safeErrorMessage(err, "Database save failed") });
         res.status(500).json({ error: "Database save failed" });
       }
     });
@@ -1588,7 +1952,7 @@ app.get('/api/stats/gc-distribution', async (req: Request, res: Response) => {
 });
 
 // ─── REGISTER NEW STRAIN ─────────────────────────────────────────────────────
-app.post('/api/strains', requireAdmin, async (req: Request, res: Response) => {
+app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Request, res: Response) => {
   try {
     const {
       organismId,
@@ -1646,8 +2010,29 @@ app.post('/api/strains', requireAdmin, async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to register new strain in the database." });
   }
 });
+
+app.use((req: Request, res: Response) => {
+  res.status(404).json({ error: "Not found" });
+});
+
+app.use((error: Error, req: Request, res: Response, _next: NextFunction) => {
+  const statusCode = error.message === 'CORS origin not allowed' ? 403 : 500;
+  logEvent(statusCode >= 500 ? 'error' : 'warn', 'request_error', {
+    requestId: currentContext()?.requestId,
+    method: req.method,
+    path: req.path,
+    statusCode,
+    error: safeErrorMessage(error, 'Request failed'),
+    stack: isProduction ? undefined : error.stack,
+  });
+
+  res.status(statusCode).json({
+    error: statusCode === 403 ? "Forbidden" : "Request failed",
+    requestId: currentContext()?.requestId,
+  });
+});
 // ─── START SERVER ────────────────────────────────────────────────────────────
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Bharat Genome Atlas API live on port ${PORT}`);
+  logEvent('info', 'api_started', { port: PORT, environment: process.env.NODE_ENV || 'development' });
 });

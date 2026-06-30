@@ -2,35 +2,68 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: bmga
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-bmga}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d bmga"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 20
+
+  migrate:
+    build:
+      context: ./backend
+      target: builder
+    profiles:
+      - migrate
+    environment:
+      NODE_ENV: ${BACKEND_NODE_ENV:-development}
+      ALLOW_INSECURE_DEV_SECRETS: ${ALLOW_INSECURE_DEV_SECRETS:-true}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/bmga?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-dev-local-jwt-secret-change-before-production-64-characters}
+      BMGA_ADMIN_EMAIL: ${BMGA_ADMIN_EMAIL:-maya.admin@bmga.local}
+      BMGA_ADMIN_PASSWORD: ${BMGA_ADMIN_PASSWORD:-MAYA@Bmga#2026!Results-47}
+      BMGA_DEMO_PASSWORD: ${BMGA_DEMO_PASSWORD:-BMGA@Demo#2026!Research-19}
+      SEED_DEMO_USER: ${SEED_DEMO_USER:-false}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["npm", "run", "docker:migrate"]
+    restart: "no"
 
   backend:
     build:
       context: ./backend
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/bmga?schema=public
-      JWT_SECRET: change-me-in-production
-      BMGA_ADMIN_EMAIL: maya.admin@bmga.local
-      BMGA_ADMIN_PASSWORD: MAYA@Bmga#2026!Results-47
-      BMGA_DEMO_PASSWORD: BMGA@Demo#2026!Research-19
-      CORS_ORIGIN: http://localhost:3000
-      PORT: 3001
+      NODE_ENV: ${BACKEND_NODE_ENV:-development}
+      ALLOW_INSECURE_DEV_SECRETS: ${ALLOW_INSECURE_DEV_SECRETS:-true}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/bmga?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-dev-local-jwt-secret-change-before-production-64-characters}
+      BMGA_ADMIN_EMAIL: ${BMGA_ADMIN_EMAIL:-maya.admin@bmga.local}
+      BMGA_ADMIN_PASSWORD: ${BMGA_ADMIN_PASSWORD:-MAYA@Bmga#2026!Results-47}
+      BMGA_DEMO_PASSWORD: ${BMGA_DEMO_PASSWORD:-BMGA@Demo#2026!Research-19}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      PORT: ${BACKEND_PORT:-3001}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENABLE_REQUEST_LOGGING: ${ENABLE_REQUEST_LOGGING:-true}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+      CONTACT_RATE_LIMIT_MAX: ${CONTACT_RATE_LIMIT_MAX:-5}
+      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-10}
+      ADMIN_RATE_LIMIT_MAX: ${ADMIN_RATE_LIMIT_MAX:-300}
+      IMPORT_RATE_LIMIT_MAX: ${IMPORT_RATE_LIMIT_MAX:-40}
+      MAX_IMPORT_FILE_BYTES: ${MAX_IMPORT_FILE_BYTES:-5242880}
     ports:
       - "3001:3001"
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -39,9 +72,10 @@ services:
     build:
       context: ./frontend
     environment:
-      BACKEND_INTERNAL_URL: http://backend:3001
-      NEXTAUTH_URL: http://localhost:3000
-      NEXTAUTH_SECRET: change-me-in-production
+      ALLOW_INSECURE_DEV_SECRETS: ${ALLOW_INSECURE_DEV_SECRETS:-true}
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:3001}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-local-nextauth-secret-change-before-production-64-characters}
       NEXT_TELEMETRY_DISABLED: 1
     ports:
       - "3000:3000"

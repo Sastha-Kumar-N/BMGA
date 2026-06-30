@@ -10,11 +10,9 @@ import {
   Dna,
   GraduationCap,
   Mail,
-  Microscope,
   Network,
   ShieldAlert,
   Sparkles,
-  UsersRound,
 } from 'lucide-react';
 
 export const metadata: Metadata = {
@@ -51,7 +49,7 @@ const leadershipMembers: CoreMember[] = [
   {
     name: 'Dr. Sabarinath Subramaniam',
     title: 'Director, Sivasakthi Science Foundation (SSF)',
-    bio: 'Science leader with over 25 years of experience across Biotechnology, Neuroscience, Bioinformatics, and Plant Genomics. Guides BGDB’s scientific vision, research partnerships, data strategy, and long-term roadmap.',
+    bio: "Science leader with over 25 years of experience across Biotechnology, Neuroscience, Bioinformatics, and Plant Genomics. Guides BGDB's scientific vision, research partnerships, data strategy, and long-term roadmap.",
     email: 'shabari@sivasakthifoundation.org',
     portraitAlt: 'Portrait of Dr. Sabarinath Subramaniam',
     tags: ['Scientific Vision', 'Research Partnerships', 'Data Strategy'],

@@ -3,6 +3,25 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import type { NextAuthOptions } from "next-auth";
 import { serverApiUrl } from "@/app/lib/api-server";
 
+const isProduction = process.env.NODE_ENV === "production";
+const isProductionBuild = process.env.NEXT_PHASE === "phase-production-build";
+const allowInsecureDevSecrets = process.env.ALLOW_INSECURE_DEV_SECRETS === "true";
+const sessionSecret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+const nextAuthUrl = process.env.NEXTAUTH_URL || "";
+const useSecureCookies = nextAuthUrl.toLowerCase().startsWith("https://");
+const unsafeSessionSecret = !sessionSecret
+  || sessionSecret.length < 32
+  || ["change-me", "change-me-in-production", "dev-secret-change-me", "secret"].includes(sessionSecret)
+  || /^dev-local-/i.test(sessionSecret);
+
+if (isProduction && !isProductionBuild && !allowInsecureDevSecrets && unsafeSessionSecret) {
+  throw new Error("NEXTAUTH_SECRET or AUTH_SECRET must be set to a strong non-placeholder value in production.");
+}
+
+if (isProduction && !isProductionBuild && !allowInsecureDevSecrets && !useSecureCookies) {
+  throw new Error("NEXTAUTH_URL must use https:// in production so session cookies are secure.");
+}
+
 type LoginResponse = {
   token?: string;
   user?: {
@@ -72,7 +91,23 @@ const authOptions: NextAuthOptions = {
       return session;
     }
   },
-  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "dev-secret-change-me",
+  session: {
+    strategy: "jwt",
+    maxAge: Number(process.env.SESSION_MAX_AGE_SECONDS || 60 * 60 * 8),
+    updateAge: Number(process.env.SESSION_UPDATE_AGE_SECONDS || 60 * 15),
+  },
+  cookies: {
+    sessionToken: {
+      name: useSecureCookies ? "__Secure-next-auth.session-token" : "next-auth.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+      },
+    },
+  },
+  secret: sessionSecret || "local-development-session-secret-minimum-32-chars",
   pages: {
     signIn: '/login',
   }

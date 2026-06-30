@@ -11,6 +11,26 @@ if (!connectionString) {
 const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+const isProduction = process.env.NODE_ENV === 'production';
+const allowInsecureDevSecrets = process.env.ALLOW_INSECURE_DEV_SECRETS === 'true';
+const seedDemoUser = process.env.SEED_DEMO_USER === 'true' || process.env.SEED_DEMO_DATA === 'true';
+const seedDemoData = process.env.SEED_DEMO_DATA === 'true';
+
+function requiredSecret(name: string, fallback: string) {
+  const value = process.env[name] || fallback;
+  if (isProduction && !allowInsecureDevSecrets && (!process.env[name] || value === fallback || value.length < 16)) {
+    throw new Error(`${name} must be set to a strong non-placeholder value before production seeding.`);
+  }
+  return value;
+}
+
+function requiredEmail(name: string, fallback: string) {
+  const value = process.env[name] || fallback;
+  if (isProduction && !allowInsecureDevSecrets && (!process.env[name] || value === fallback)) {
+    throw new Error(`${name} must be set before production seeding.`);
+  }
+  return value;
+}
 
 async function seedToolRun(toolName: string, organismId: number, strainId: number, summary: Record<string, unknown>, table: { tableName: string; columns: string[]; rows: Record<string, unknown>[] }) {
   const existing = await prisma.toolRun.findFirst({
@@ -110,8 +130,8 @@ async function main() {
   console.log('🌱 Starting database seed...');
 
   // 1. Ensure the dedicated admin login exists.
-  const adminEmail = process.env.BMGA_ADMIN_EMAIL || 'maya.admin@bmga.local';
-  const adminPassword = process.env.BMGA_ADMIN_PASSWORD || 'MAYA@Bmga#2026!Results-47';
+  const adminEmail = requiredEmail('BMGA_ADMIN_EMAIL', 'maya.admin@bmga.local');
+  const adminPassword = requiredSecret('BMGA_ADMIN_PASSWORD', 'MAYA@Bmga#2026!Results-47');
 
   if (adminPassword.length < 16) {
     throw new Error('BMGA_ADMIN_PASSWORD must be at least 16 characters.');
@@ -135,31 +155,40 @@ async function main() {
   });
   console.log(`✅ Admin login ready: ${adminAccount.email}`);
 
-  // 2. Ensure the demo researcher login exists.
-  console.log('👤 Ensuring demo user exists...');
-  const demoPassword = process.env.BMGA_DEMO_PASSWORD || 'BMGA@Demo#2026!Research-19';
-  if (demoPassword.length < 10) {
-    throw new Error('BMGA_DEMO_PASSWORD must be at least 10 characters.');
+  if (!seedDemoUser) {
+    console.log('✅ Demo user seeding skipped. Set SEED_DEMO_USER=true to enable it outside production.');
+  } else {
+    // 2. Ensure the demo researcher login exists.
+    console.log('👤 Ensuring demo user exists...');
+    const demoPassword = requiredSecret('BMGA_DEMO_PASSWORD', 'BMGA@Demo#2026!Research-19');
+    if (demoPassword.length < 10) {
+      throw new Error('BMGA_DEMO_PASSWORD must be at least 10 characters.');
+    }
+
+    const hashedPassword = await bcrypt.hash(demoPassword, 10);
+    const adminUser = await prisma.user.upsert({
+      where: { email: 'admin@genomics.com' },
+      update: {
+        passwordHash: hashedPassword,
+        name: 'System Admin',
+        role: UserRole.RESEARCHER,
+      },
+      create: {
+        email: 'admin@genomics.com',
+        passwordHash: hashedPassword,
+        name: 'System Admin',
+        role: UserRole.RESEARCHER,
+      },
+    });
+    console.log(`✅ Demo login ready: ${adminUser.email}`);
   }
 
-  const hashedPassword = await bcrypt.hash(demoPassword, 10);
-  const adminUser = await prisma.user.upsert({
-    where: { email: 'admin@genomics.com' },
-    update: {
-      passwordHash: hashedPassword,
-      name: 'System Admin',
-      role: UserRole.RESEARCHER,
-    },
-    create: {
-      email: 'admin@genomics.com',
-      passwordHash: hashedPassword,
-      name: 'System Admin',
-      role: UserRole.RESEARCHER,
-    },
-  });
-  console.log(`✅ Demo login ready: ${adminUser.email}`);
+  if (!seedDemoData) {
+    console.log('✅ Demo organism and tool-result seeding skipped. Set SEED_DEMO_DATA=true only for local demos.');
+    return;
+  }
 
-  // 3. Ensure the base organism exists.
+  // 3. Ensure the base demo organism exists.
   const organism = await prisma.organism.upsert({
     where: { scientificName: 'Pseudomonas aeruginosa' },
     update: {
