@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
-import { ApprovalStatus, Prisma, PrismaClient, UserAffiliation, UserRole } from '@prisma/client';
+import { ApprovalStatus, ContactMessageStatus, Prisma, PrismaClient, UserAffiliation, UserRole } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import cors from 'cors';
@@ -138,6 +138,50 @@ function textValue(value: unknown, maxLength = 500) {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, maxLength) : undefined;
+}
+
+function sanitizeContactText(value: unknown, maxLength = 500, preserveNewlines = false) {
+  const raw = textValue(value, maxLength);
+  if (!raw) return undefined;
+
+  const withoutMarkup = raw
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/[<>]/g, "");
+  const controlPattern = preserveNewlines
+    ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g
+    : /[\u0000-\u001F\u007F]/g;
+  const cleaned = withoutMarkup.replace(controlPattern, " ");
+
+  return preserveNewlines
+    ? cleaned.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join("\n").slice(0, maxLength)
+    : cleaned.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function buildContactMessagePayload(body: Record<string, unknown>) {
+  const name = sanitizeContactText(body.name, 160);
+  const email = normalizedEmail(body.email);
+  const organization = sanitizeContactText(body.organization, 220);
+  const subject = sanitizeContactText(body.subject, 240);
+  const message = sanitizeContactText(body.message, 5000, true);
+
+  if (!name || !email || !subject || !message) {
+    return { error: "Name, email, subject, and message are required" as const };
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return { error: "Please provide a valid email address" as const };
+  }
+
+  return {
+    data: {
+      name,
+      email,
+      organization,
+      subject,
+      message,
+    },
+  };
 }
 
 function normalizedEmail(value: unknown) {
@@ -476,6 +520,28 @@ app.get('/api/me', requireAuth, async (req: AuthenticatedRequest, res: Response)
   res.json({ user: publicUser(user), roleLabel: roleLabel(user.role) });
 });
 
+app.post('/api/contact-messages', async (req: Request, res: Response) => {
+  try {
+    const payload = buildContactMessagePayload(req.body || {});
+    if ("error" in payload) {
+      return res.status(400).json({ error: payload.error });
+    }
+
+    const contactMessage = await prisma.contactMessage.create({
+      data: payload.data,
+      select: { createdAt: true },
+    });
+
+    res.status(201).json({
+      message: "Contact message submitted",
+      createdAt: contactMessage.createdAt,
+    });
+  } catch (error) {
+    console.error("Contact Message Submission Error:", error);
+    res.status(500).json({ error: "Failed to submit contact message" });
+  }
+});
+
 // ─── USER SUBMISSIONS & BLOGS ───────────────────────────────────────────────
 
 app.get('/api/me/uploads', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
@@ -706,6 +772,148 @@ app.get('/api/admin/me', requireAdmin, async (req: AuthenticatedRequest, res: Re
   res.json({ ok: true, user: req.user });
 });
 
+app.get('/api/admin/contact-messages', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const status = String(req.query.status || "").toUpperCase();
+    const statusFilter = Object.values(ContactMessageStatus).includes(status as ContactMessageStatus)
+      ? status as ContactMessageStatus
+      : undefined;
+    const includeArchived = String(req.query.archived || "").toLowerCase() === "true";
+    const search = sanitizeContactText(req.query.search, 200);
+
+    const where: Prisma.ContactMessageWhereInput = {};
+    if (!includeArchived) where.archived = false;
+    if (statusFilter) where.status = statusFilter;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+        { organization: { contains: search, mode: "insensitive" } },
+        { subject: { contains: search, mode: "insensitive" } },
+        { message: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    const [messages, unreadCount] = await prisma.$transaction([
+      prisma.contactMessage.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.contactMessage.count({
+        where: { status: ContactMessageStatus.UNREAD, archived: false },
+      }),
+    ]);
+
+    res.json({ messages, unreadCount });
+  } catch (error) {
+    console.error("Admin Contact Message Fetch Error:", error);
+    res.status(500).json({ error: "Failed to fetch contact messages" });
+  }
+});
+
+app.get('/api/admin/contact-messages/:id', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const messageId = parseStringParam(req.params.id);
+    const message = await prisma.contactMessage.findUnique({ where: { id: messageId } });
+    if (!message) return res.status(404).json({ error: "Contact message not found" });
+    res.json(message);
+  } catch (error) {
+    console.error("Admin Contact Message Detail Error:", error);
+    res.status(500).json({ error: "Failed to fetch contact message" });
+  }
+});
+
+app.patch('/api/admin/contact-messages/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const messageId = parseStringParam(req.params.id);
+    const requestedStatus = String(req.body.status || "").toUpperCase();
+    const status = Object.values(ContactMessageStatus).includes(requestedStatus as ContactMessageStatus)
+      ? requestedStatus as ContactMessageStatus
+      : undefined;
+    const adminNotes = req.body.adminNotes === null ? null : sanitizeContactText(req.body.adminNotes, 4000, true);
+
+    const message = await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: {
+        status,
+        adminNotes: req.body.adminNotes === undefined ? undefined : adminNotes,
+      },
+    });
+
+    await writeAdminLog(req.user?.userId, "CONTACT_MESSAGE_UPDATED", "ContactMessage", messageId, {
+      status: message.status,
+    });
+
+    res.json(message);
+  } catch (error) {
+    console.error("Admin Contact Message Update Error:", error);
+    res.status(500).json({ error: "Failed to update contact message" });
+  }
+});
+
+app.post('/api/admin/contact-messages/:id/read', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const messageId = parseStringParam(req.params.id);
+    const message = await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: { status: ContactMessageStatus.READ },
+    });
+
+    await writeAdminLog(req.user?.userId, "CONTACT_MESSAGE_MARKED_READ", "ContactMessage", messageId);
+    res.json({ message: "Contact message marked as read", contactMessage: message });
+  } catch (error) {
+    console.error("Admin Contact Message Read Error:", error);
+    res.status(500).json({ error: "Failed to mark contact message as read" });
+  }
+});
+
+app.post('/api/admin/contact-messages/:id/unread', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const messageId = parseStringParam(req.params.id);
+    const message = await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: { status: ContactMessageStatus.UNREAD },
+    });
+
+    await writeAdminLog(req.user?.userId, "CONTACT_MESSAGE_MARKED_UNREAD", "ContactMessage", messageId);
+    res.json({ message: "Contact message marked as unread", contactMessage: message });
+  } catch (error) {
+    console.error("Admin Contact Message Unread Error:", error);
+    res.status(500).json({ error: "Failed to mark contact message as unread" });
+  }
+});
+
+app.post('/api/admin/contact-messages/:id/archive', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const messageId = parseStringParam(req.params.id);
+    const message = await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: { archived: true },
+    });
+
+    await writeAdminLog(req.user?.userId, "CONTACT_MESSAGE_ARCHIVED", "ContactMessage", messageId);
+    res.json({ message: "Contact message archived", contactMessage: message });
+  } catch (error) {
+    console.error("Admin Contact Message Archive Error:", error);
+    res.status(500).json({ error: "Failed to archive contact message" });
+  }
+});
+
+app.delete('/api/admin/contact-messages/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const messageId = parseStringParam(req.params.id);
+    await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: { archived: true },
+    });
+    await writeAdminLog(req.user?.userId, "CONTACT_MESSAGE_ARCHIVED", "ContactMessage", messageId);
+    res.json({ message: "Contact message archived" });
+  } catch (error) {
+    console.error("Admin Contact Message Delete Error:", error);
+    res.status(500).json({ error: "Failed to archive contact message" });
+  }
+});
+
 app.get('/api/admin/users', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const users = await prisma.user.findMany({
@@ -777,6 +985,47 @@ app.patch('/api/admin/users/:id', requireAdmin, async (req: AuthenticatedRequest
   } catch (error) {
     console.error("Admin User Update Error:", error);
     res.status(500).json({ error: "Failed to update user privileges" });
+  }
+});
+
+app.post('/api/admin/users/:id/password-reset', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const targetUserId = parseStringParam(req.params.id);
+    const newPassword = req.body.newPassword;
+
+    if (!targetUserId) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, email: true, role: true },
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { id: targetUserId },
+      data: { passwordHash: hashedPassword },
+    });
+
+    await writeAdminLog(req.user?.userId, "USER_PASSWORD_RESET", "User", targetUserId, {
+      targetEmail: targetUser.email,
+      targetRole: targetUser.role,
+    });
+
+    res.json({ message: "Password reset successfully" });
+  } catch (error) {
+    console.error("Admin Password Reset Error:", error);
+    res.status(500).json({ error: "Failed to reset user password" });
   }
 });
 

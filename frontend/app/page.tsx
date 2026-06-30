@@ -1,6 +1,6 @@
 'use client';
 
-import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useMemo, useState } from 'react';
@@ -14,11 +14,9 @@ import {
   Database,
   Dna,
   FlaskConical,
-  Leaf,
   LogOut,
   Mail,
   MapPin,
-  Microscope,
   Phone,
   Search,
   Send,
@@ -28,6 +26,16 @@ import {
   Waves,
 } from 'lucide-react';
 import { apiPath } from './lib/api-client';
+import type { HomeMapStrain } from './components/HomeIndiaMap';
+
+const HomeIndiaMap = dynamic(() => import('./components/HomeIndiaMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full min-h-[420px] items-center justify-center rounded-[2rem] border border-cyan-300/10 bg-[#06152E] text-xs font-black uppercase tracking-widest text-orange-300 shadow-2xl shadow-cyan-950/40 lg:min-h-[560px]">
+      Initializing India map
+    </div>
+  ),
+});
 
 type Organism = {
   id: number;
@@ -49,7 +57,7 @@ type Strain = {
   gcContent?: number | string | null;
   genomeSize?: number | null;
   createdAt?: string | null;
-};
+} & HomeMapStrain;
 
 type AmrAlert = {
   id: number;
@@ -69,12 +77,22 @@ const EMPTY_SUMMARY: SummaryData = {
   recentAmr: [],
 };
 
+const EMPTY_CONTACT_FORM = {
+  name: '',
+  email: '',
+  organization: '',
+  subject: '',
+  message: '',
+};
+
+const CONTACT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const navItems = [
   { label: 'Home', href: '#home' },
   { label: 'Analysis', href: '#analysis' },
   { label: 'Our Projects', href: '#projects' },
   { label: 'Blog', href: '/blog' },
-  { label: 'Team', href: '#team' },
+  { label: 'Our Team', href: '/team' },
   { label: 'Contact Us', href: '#contact' },
 ];
 
@@ -142,33 +160,6 @@ const projectCards: Array<{
   },
 ];
 
-const teamGroups: Array<{
-  title: string;
-  body: string;
-  icon: LucideIcon;
-}> = [
-  {
-    title: 'Genome Informatics',
-    body: 'Data models, accession linkage, dashboards, and atlas-scale analytics.',
-    icon: Database,
-  },
-  {
-    title: 'Clinical Microbiology',
-    body: 'Pathogen surveillance, AMR interpretation, and hospital network coordination.',
-    icon: ShieldAlert,
-  },
-  {
-    title: 'Bioinformatics & MAYA',
-    body: 'Pipeline orchestration, result review, and reproducible analysis workflows.',
-    icon: Microscope,
-  },
-  {
-    title: 'Environmental Genomics',
-    body: 'Sampling strategy for soil, water, food systems, and ecological reservoirs.',
-    icon: Leaf,
-  },
-];
-
 function numericValue(value: number | string | null | undefined) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -198,10 +189,6 @@ function uniqueLocationCount(strains: Strain[]) {
   return new Set(strains.map(locationLabel)).size;
 }
 
-function mappedPointCount(strains: Strain[]) {
-  return strains.filter((strain) => numericValue(strain.latitude) !== null && numericValue(strain.longitude) !== null).length;
-}
-
 function metadataCoverage(strains: Strain[]) {
   if (!strains.length) return 0;
 
@@ -228,20 +215,27 @@ export default function HomePage() {
   const [summaryData, setSummaryData] = useState<SummaryData>(EMPTY_SUMMARY);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const [messageSent, setMessageSent] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [contactForm, setContactForm] = useState(EMPTY_CONTACT_FORM);
+  const [contactStatus, setContactStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; text: string }>({ type: 'idle', text: '' });
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadPlatformData() {
       try {
+        setDataError(null);
         const [strainsResponse, summaryResponse] = await Promise.all([
           fetch(apiPath('/strains'), { cache: 'no-store' }),
           fetch(apiPath('/dashboard/summary'), { cache: 'no-store' }),
         ]);
 
+        if (!strainsResponse.ok) {
+          throw new Error(`Location request failed with status ${strainsResponse.status}`);
+        }
+
         const [strainRecords, summaryRecords] = await Promise.all([
-          strainsResponse.ok ? strainsResponse.json() as Promise<Strain[]> : Promise.resolve([]),
+          strainsResponse.json() as Promise<Strain[]>,
           summaryResponse.ok ? summaryResponse.json() as Promise<SummaryData> : Promise.resolve(EMPTY_SUMMARY),
         ]);
 
@@ -250,6 +244,11 @@ export default function HomePage() {
         setSummaryData(summaryRecords);
       } catch (error) {
         console.error('Home page data load failed', error);
+        if (isMounted) {
+          setDataError(error instanceof Error ? error.message : 'Unable to load live location data.');
+          setStrains([]);
+          setSummaryData(EMPTY_SUMMARY);
+        }
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -307,9 +306,49 @@ export default function HomePage() {
     },
   ];
 
-  const handleContactSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const updateContactField = (field: keyof typeof EMPTY_CONTACT_FORM, value: string) => {
+    setContactForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleContactSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setMessageSent(true);
+    const payload = {
+      name: contactForm.name.trim(),
+      email: contactForm.email.trim(),
+      organization: contactForm.organization.trim(),
+      subject: contactForm.subject.trim(),
+      message: contactForm.message.trim(),
+    };
+
+    if (!payload.name || !payload.email || !payload.subject || !payload.message) {
+      setContactStatus({ type: 'error', text: 'Please fill in your name, email, subject, and message.' });
+      return;
+    }
+
+    if (!CONTACT_EMAIL_PATTERN.test(payload.email)) {
+      setContactStatus({ type: 'error', text: 'Please enter a valid email address.' });
+      return;
+    }
+
+    setContactStatus({ type: 'loading', text: 'Sending your message...' });
+
+    try {
+      const response = await fetch(apiPath('/contact-messages'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Message submission failed.');
+      }
+
+      setContactForm(EMPTY_CONTACT_FORM);
+      setContactStatus({ type: 'success', text: 'Message sent. The BMGA admin team can now read it in the Admin panel.' });
+    } catch (error) {
+      setContactStatus({ type: 'error', text: error instanceof Error ? error.message : 'Message submission failed.' });
+    }
   };
 
   return (
@@ -406,24 +445,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="relative min-h-[420px] overflow-hidden rounded-[2rem] border border-cyan-300/10 bg-[#06152E] shadow-2xl shadow-cyan-950/40 lg:min-h-[560px]">
-            <Image
-              src="/home/bmga-india-genome-atlas.png"
-              alt="Glowing genomic data map of India for Bharat Genome Atlas"
-              fill
-              priority
-              sizes="(max-width: 1024px) 100vw, 760px"
-              className="object-cover object-center"
-            />
-            <div className="absolute inset-0 bg-gradient-to-r from-[#0B1B3A]/55 via-transparent to-transparent" />
-            <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-white/10 bg-[#071833]/85 p-4 backdrop-blur-md">
-              <div className="grid grid-cols-3 gap-3 text-xs">
-                <HeroSignal label="Mapped Points" value={formatIndianNumber(mappedPointCount(strains))} />
-                <HeroSignal label="MAYA Ready" value={formatIndianNumber(strains.length)} />
-                <HeroSignal label="AMR Signals" value={formatIndianNumber(summaryData.recentAmr.length)} />
-              </div>
-            </div>
-          </div>
+          <HomeIndiaMap strains={strains} loading={loading} error={dataError} />
         </div>
       </section>
 
@@ -541,32 +563,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section id="team" className="bg-white px-5 py-20 md:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="max-w-2xl">
-            <h2 className="text-4xl font-black tracking-tight text-[#0B1B3A]">Team</h2>
-            <p className="mt-4 text-base font-bold leading-7 text-slate-500">
-              A multidisciplinary consortium of researchers, clinicians, bioinformaticians, and data teams.
-            </p>
-          </div>
-
-          <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-            {teamGroups.map((group) => {
-              const Icon = group.icon;
-              return (
-                <article key={group.title} className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-slate-100 text-[#0B1B3A]">
-                    <Icon size={28} />
-                  </div>
-                  <h3 className="mt-5 text-lg font-black tracking-tight text-[#0B1B3A]">{group.title}</h3>
-                  <p className="mt-3 text-sm font-bold leading-6 text-slate-500">{group.body}</p>
-                </article>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
       <section id="contact" className="relative overflow-hidden bg-[#0B1B3A] px-5 py-20 text-white md:px-8">
         <div className="absolute right-0 top-0 h-full w-1/2 bg-[radial-gradient(circle_at_70%_45%,rgba(14,165,233,0.2),transparent_35%)]" />
         <div className="relative mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.75fr_1.25fr]">
@@ -584,19 +580,58 @@ export default function HomePage() {
 
           <form onSubmit={handleContactSubmit} className="rounded-3xl border border-white/10 bg-white/10 p-5 backdrop-blur-md md:p-7">
             <div className="grid gap-4 md:grid-cols-2">
-              <input className="h-12 rounded-xl border border-white/10 bg-[#14264B] px-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400" placeholder="Your Name" required />
-              <input className="h-12 rounded-xl border border-white/10 bg-[#14264B] px-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400" placeholder="Your Email" type="email" required />
-              <input className="h-12 rounded-xl border border-white/10 bg-[#14264B] px-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400" placeholder="Organization" />
-              <input className="h-12 rounded-xl border border-white/10 bg-[#14264B] px-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400" placeholder="Subject" required />
-              <textarea className="min-h-36 rounded-xl border border-white/10 bg-[#14264B] px-4 py-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400 md:col-span-2" placeholder="Your Message" required />
+              <input
+                value={contactForm.name}
+                onChange={(event) => updateContactField('name', event.target.value)}
+                className="h-12 rounded-xl border border-white/10 bg-[#14264B] px-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400"
+                placeholder="Your Name"
+                required
+              />
+              <input
+                value={contactForm.email}
+                onChange={(event) => updateContactField('email', event.target.value)}
+                className="h-12 rounded-xl border border-white/10 bg-[#14264B] px-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400"
+                placeholder="Your Email"
+                type="email"
+                required
+              />
+              <input
+                value={contactForm.organization}
+                onChange={(event) => updateContactField('organization', event.target.value)}
+                className="h-12 rounded-xl border border-white/10 bg-[#14264B] px-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400"
+                placeholder="Organization"
+              />
+              <input
+                value={contactForm.subject}
+                onChange={(event) => updateContactField('subject', event.target.value)}
+                className="h-12 rounded-xl border border-white/10 bg-[#14264B] px-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400"
+                placeholder="Subject"
+                required
+              />
+              <textarea
+                value={contactForm.message}
+                onChange={(event) => updateContactField('message', event.target.value)}
+                className="min-h-36 rounded-xl border border-white/10 bg-[#14264B] px-4 py-4 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-orange-400 md:col-span-2"
+                placeholder="Your Message"
+                required
+              />
             </div>
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <button type="submit" className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-6 py-4 text-sm font-black text-white transition hover:bg-orange-400">
+              <button
+                type="submit"
+                disabled={contactStatus.type === 'loading'}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-6 py-4 text-sm font-black text-white transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
                 <Send size={16} />
-                Send Message
+                {contactStatus.type === 'loading' ? 'Sending...' : 'Send Message'}
               </button>
-              {messageSent && (
-                <p className="text-sm font-bold text-emerald-300">Message captured locally for the portal workflow.</p>
+              {contactStatus.type !== 'idle' && (
+                <p
+                  aria-live="polite"
+                  className={`text-sm font-bold ${contactStatus.type === 'error' ? 'text-red-200' : contactStatus.type === 'success' ? 'text-emerald-300' : 'text-orange-200'}`}
+                >
+                  {contactStatus.text}
+                </p>
               )}
             </div>
           </form>
@@ -621,7 +656,7 @@ export default function HomePage() {
           </div>
           <FooterColumn title="Platform" links={['Dashboard', 'Analysis', 'Organism Atlas', 'MAYA Results']} />
           <FooterColumn title="Resources" links={['Blog', 'Create Account', 'User Guide', 'Downloads']} />
-          <FooterColumn title="About" links={['Our Projects', 'Team', 'Contact Us', 'Accessibility']} />
+          <FooterColumn title="About" links={['Our Projects', 'Our Team', 'Contact Us', 'Accessibility']} />
         </div>
         <div className="mx-auto flex max-w-7xl flex-col gap-4 pt-6 text-xs font-bold text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <span>2026 BMGA. All rights reserved.</span>
@@ -634,15 +669,6 @@ export default function HomePage() {
         </div>
       </footer>
     </main>
-  );
-}
-
-function HeroSignal({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="font-mono text-lg font-black text-white">{value}</p>
-      <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-slate-400">{label}</p>
-    </div>
   );
 }
 
@@ -684,7 +710,7 @@ function footerHref(link: string) {
     'Our Projects': '#projects',
     Blog: '/blog',
     'Create Account': '/register',
-    Team: '#team',
+    'Our Team': '/team',
     'Contact Us': '#contact',
   };
 

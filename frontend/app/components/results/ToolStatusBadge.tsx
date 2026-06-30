@@ -19,9 +19,18 @@ const STATUS_ICONS = {
   not_available: MinusCircle,
 };
 
+const STATUS_LABELS: Record<ToolStatus, string> = {
+  completed: "Ready",
+  warning: "Warning",
+  partial: "Partial",
+  failed: "Failed",
+  pending: "Pending",
+  not_available: "Not available",
+};
+
 export default function ToolStatusBadge({ status }: { status: ToolStatus }) {
   const Icon = STATUS_ICONS[status];
-  const label = status.replace("_", " ");
+  const label = STATUS_LABELS[status];
 
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${STATUS_STYLES[status]}`}>

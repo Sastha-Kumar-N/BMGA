@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpenCheck, ClipboardCheck, Database, ShieldCheck, UsersRound } from 'lucide-react';
+import { BookOpenCheck, ClipboardCheck, Database, Inbox, ShieldCheck, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 
@@ -11,11 +11,16 @@ type StatusRecord = {
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
 };
 
+type ContactMessagesResponse = {
+  unreadCount: number;
+};
+
 export default function AdminCockpitPage() {
   const { data: session } = useSession();
   const [userCount, setUserCount] = useState(0);
   const [uploads, setUploads] = useState<StatusRecord[]>([]);
   const [posts, setPosts] = useState<StatusRecord[]>([]);
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const headers = useMemo(() => ({
@@ -28,20 +33,23 @@ export default function AdminCockpitPage() {
     async function load() {
       setLoading(true);
       try {
-        const [usersRes, uploadsRes, postsRes] = await Promise.all([
+        const [usersRes, uploadsRes, postsRes, messagesRes] = await Promise.all([
           fetch(apiPath('/admin/users'), { headers, cache: 'no-store' }),
           fetch(apiPath('/admin/organism-uploads'), { headers, cache: 'no-store' }),
           fetch(apiPath('/admin/blog-posts'), { headers, cache: 'no-store' }),
+          fetch(apiPath('/admin/contact-messages'), { headers, cache: 'no-store' }),
         ]);
-        const [usersData, uploadsData, postsData] = await Promise.all([
+        const [usersData, uploadsData, postsData, messagesData] = await Promise.all([
           usersRes.ok ? usersRes.json() as Promise<unknown[]> : Promise.resolve([]),
           uploadsRes.ok ? uploadsRes.json() as Promise<StatusRecord[]> : Promise.resolve([]),
           postsRes.ok ? postsRes.json() as Promise<StatusRecord[]> : Promise.resolve([]),
+          messagesRes.ok ? messagesRes.json() as Promise<ContactMessagesResponse> : Promise.resolve({ unreadCount: 0 }),
         ]);
         if (!active) return;
         setUserCount(usersData.length);
         setUploads(uploadsData);
         setPosts(postsData);
+        setUnreadMessages(messagesData.unreadCount || 0);
       } catch (error) {
         console.error('Admin cockpit load failed', error);
       } finally {
@@ -66,21 +74,23 @@ export default function AdminCockpitPage() {
             <ShieldCheck className="text-orange-400" size={36} /> Admin Cockpit
           </h1>
           <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-300">
-            Manage registered users, role privileges, organism submissions, and blog approval workflows from one private dashboard.
+            Manage registered users, role privileges, organism submissions, blog approval workflows, and contact messages from one private dashboard.
           </p>
         </header>
 
-        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
           <MetricCard icon={UsersRound} label="Registered Users" value={loading ? '...' : String(userCount)} href="/admin/users" />
           <MetricCard icon={ClipboardCheck} label="Pending Uploads" value={loading ? '...' : String(pendingUploads)} href="/admin/uploads" />
           <MetricCard icon={BookOpenCheck} label="Pending Blog Posts" value={loading ? '...' : String(pendingPosts)} href="/admin/blogs" />
+          <MetricCard icon={Inbox} label="Contact Messages" value={loading ? '...' : String(unreadMessages)} href="/admin/contact-messages" />
           <MetricCard icon={Database} label="Published Uploads" value={loading ? '...' : String(uploads.filter((item) => item.status === 'APPROVED').length)} href="/dashboard" />
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-3">
+        <section className="grid gap-5 lg:grid-cols-4">
           <AdminLink href="/admin/users" title="User Privilege Management" body="Assign Normal User, Contributor, Moderator, or Admin privileges." />
           <AdminLink href="/admin/uploads" title="Pending Organism Review" body="Edit, approve, reject, or delete submitted organism metadata." />
           <AdminLink href="/admin/blogs" title="Blog Approval Management" body="Review submitted blog posts before public publication." />
+          <AdminLink href="/admin/contact-messages" title={`Contact Messages (${loading ? '...' : unreadMessages})`} body="Read public collaboration requests and manage read or unread follow-up status." />
         </section>
       </div>
     </main>

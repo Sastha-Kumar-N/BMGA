@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, ShieldCheck, UsersRound } from 'lucide-react';
+import { AlertCircle, CheckCircle2, KeyRound, ShieldCheck, UsersRound } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 
 type AdminUser = {
@@ -36,6 +36,8 @@ const AFFILIATION_OPTIONS = [
 export default function AdminUsersPage() {
   const { data: session } = useSession();
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [resetUserId, setResetUserId] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [message, setMessage] = useState<{ type: 'idle' | 'success' | 'error' | 'loading'; text: string }>({ type: 'idle', text: '' });
 
   const headers = useMemo(() => ({
@@ -78,6 +80,24 @@ export default function AdminUsersPage() {
     }
   };
 
+  const resetPassword = async (user: AdminUser) => {
+    setMessage({ type: 'loading', text: 'Resetting user password...' });
+    try {
+      const response = await fetch(apiPath(`/admin/users/${user.id}/password-reset`), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ newPassword }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to reset password');
+      setMessage({ type: 'success', text: `Password reset for ${user.email}` });
+      setNewPassword('');
+      setResetUserId('');
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to reset password' });
+    }
+  };
+
   return (
     <main className="min-h-screen bg-[#f6f8fb] px-5 py-8 text-[#0B1B3A] md:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
@@ -109,6 +129,7 @@ export default function AdminUsersPage() {
                   <th className="px-5 py-4">Role</th>
                   <th className="px-5 py-4">Submissions</th>
                   <th className="px-5 py-4">Joined</th>
+                  <th className="px-5 py-4">Password Reset</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -132,6 +153,53 @@ export default function AdminUsersPage() {
                       {user._count?.organismUploads || 0} organisms | {user._count?.blogPosts || 0} posts
                     </td>
                     <td className="px-5 py-4 text-sm font-bold text-slate-500">{new Date(user.createdAt).toLocaleDateString()}</td>
+                    <td className="px-5 py-4">
+                      {resetUserId === user.id ? (
+                        <div className="grid min-w-[280px] gap-2">
+                          <input
+                            type="password"
+                            value={newPassword}
+                            onChange={(event) => setNewPassword(event.target.value)}
+                            placeholder="New temporary password"
+                            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-orange-500"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => resetPassword(user)}
+                              disabled={message.type === 'loading'}
+                              className="inline-flex items-center gap-2 rounded-xl bg-[#0B1B3A] px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white transition hover:bg-orange-500 disabled:opacity-50"
+                            >
+                              <KeyRound size={13} /> Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResetUserId('');
+                                setNewPassword('');
+                              }}
+                              className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 transition hover:border-red-200 hover:text-red-600"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          <p className="text-[11px] font-semibold leading-4 text-slate-400">
+                            Min 10 chars with uppercase, lowercase, number, and symbol.
+                          </p>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetUserId(user.id);
+                            setNewPassword('');
+                          }}
+                          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-[#0B1B3A] transition hover:border-orange-300 hover:text-orange-600"
+                        >
+                          <KeyRound size={13} /> Reset
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
