@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
+import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -70,6 +71,16 @@ type AmrAlert = {
 type SummaryData = {
   recentStrains: Strain[];
   recentAmr: AmrAlert[];
+};
+
+type FooterLink = {
+  label: string;
+  href: string;
+};
+
+type FooterSection = {
+  title: string;
+  links: FooterLink[];
 };
 
 const EMPTY_SUMMARY: SummaryData = {
@@ -211,6 +222,7 @@ function metadataCoverage(strains: Strain[]) {
 
 export default function HomePage() {
   const { data: session } = useSession();
+  const pathname = usePathname();
   const [strains, setStrains] = useState<Strain[]>([]);
   const [summaryData, setSummaryData] = useState<SummaryData>(EMPTY_SUMMARY);
   const [query, setQuery] = useState('');
@@ -303,6 +315,45 @@ export default function HomePage() {
       value: `${metadataCoverage(strains).toFixed(1)}%`,
       icon: CheckCircle2,
       color: 'text-green-400',
+    },
+  ];
+
+  const firstOrganismId = useMemo(() => {
+    return strains.find((strain) => strain.organismId)?.organismId || null;
+  }, [strains]);
+
+  const mayaResultsHref = firstOrganismId ? `/organisms/${firstOrganismId}/results` : '/dashboard';
+  const accountResourceLink = session
+    ? { label: 'Account Dashboard', href: '/account' }
+    : { label: 'Create Account', href: '/register' };
+
+  const footerSections: FooterSection[] = [
+    {
+      title: 'Platform',
+      links: [
+        { label: 'Dashboard', href: '/dashboard' },
+        { label: 'Analysis', href: '/#analysis' },
+        { label: 'Organism Atlas', href: '/dashboard#india-atlas' },
+        { label: 'MAYA Results', href: mayaResultsHref },
+      ],
+    },
+    {
+      title: 'Resources',
+      links: [
+        { label: 'Blog', href: '/blog' },
+        accountResourceLink,
+        { label: 'User Guide', href: '/#guide' },
+        { label: 'Downloads', href: '/#downloads' },
+      ],
+    },
+    {
+      title: 'About',
+      links: [
+        { label: 'Our Projects', href: '/#projects' },
+        { label: 'Our Team', href: '/team' },
+        { label: 'Contact Us', href: '/#contact' },
+        { label: 'Accessibility', href: '/#accessibility' },
+      ],
     },
   ];
 
@@ -563,6 +614,79 @@ export default function HomePage() {
         </div>
       </section>
 
+      <section id="guide" className="bg-white px-5 py-20 md:px-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="max-w-2xl">
+            <p className="text-xs font-black uppercase tracking-widest text-orange-500">User Guide</p>
+            <h2 className="mt-3 text-4xl font-black tracking-tight text-[#0B1B3A]">Navigate the BMGA Platform</h2>
+            <p className="mt-4 text-base font-bold leading-7 text-slate-500">
+              Core pathways for browsing organism records, reviewing atlas coverage, and opening validated MAYA outputs.
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+            {[
+              { title: 'Organism Registry', body: 'Search live records by organism, strain, source, city, state, and genome metadata.', href: '/dashboard', icon: Database },
+              { title: 'India Atlas', body: 'Open the dashboard atlas for location-based organism summaries and source intelligence.', href: '/dashboard#india-atlas', icon: MapPin },
+              { title: 'MAYA Results', body: firstOrganismId ? 'Open the first available organism result workspace from current live data.' : 'Open the dashboard and select an organism to view available MAYA outputs.', href: mayaResultsHref, icon: BarChart3 },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link key={item.title} href={item.href} className="group rounded-2xl border border-slate-200 bg-slate-50 p-6 shadow-sm transition hover:-translate-y-1 hover:border-orange-200 hover:bg-white hover:shadow-xl hover:shadow-orange-100/60">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#0B1B3A] text-orange-300 transition group-hover:bg-orange-500 group-hover:text-white">
+                    <Icon size={22} />
+                  </span>
+                  <h3 className="mt-6 text-xl font-black tracking-tight text-[#0B1B3A]">{item.title}</h3>
+                  <p className="mt-3 text-sm font-bold leading-7 text-slate-500">{item.body}</p>
+                  <span className="mt-5 inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-orange-600">
+                    Open <ArrowRight size={14} />
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section id="downloads" className="bg-slate-50 px-5 py-20 md:px-8">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest text-orange-500">Downloads</p>
+            <h2 className="mt-3 text-4xl font-black tracking-tight text-[#0B1B3A]">Open Available Data Exports</h2>
+            <p className="mt-4 text-base font-bold leading-7 text-slate-500">
+              Downloadable files are exposed from real organism result pages when backend records include generated MAYA files.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Link href="/dashboard" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-orange-200 hover:shadow-xl hover:shadow-orange-100/60">
+              <p className="text-xs font-black uppercase tracking-widest text-slate-400">Registry</p>
+              <h3 className="mt-3 text-lg font-black text-[#0B1B3A]">Dashboard Data Views</h3>
+              <p className="mt-2 text-sm font-bold leading-6 text-slate-500">Open live summaries, atlas records, and organism source tables.</p>
+            </Link>
+            <Link href={mayaResultsHref} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-orange-200 hover:shadow-xl hover:shadow-orange-100/60">
+              <p className="text-xs font-black uppercase tracking-widest text-slate-400">MAYA</p>
+              <h3 className="mt-3 text-lg font-black text-[#0B1B3A]">Result Files</h3>
+              <p className="mt-2 text-sm font-bold leading-6 text-slate-500">Open approved tool outputs and file downloads when records are available.</p>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section id="accessibility" className="bg-white px-5 py-16 md:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 rounded-2xl border border-slate-200 bg-[#0B1B3A] p-6 text-white shadow-xl shadow-slate-200/70 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest text-orange-300">Accessibility</p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight">Accessible Scientific Data Access</h2>
+            <p className="mt-2 max-w-3xl text-sm font-bold leading-7 text-slate-300">
+              BMGA pages use semantic headings, high-contrast controls, descriptive link text, keyboard-focusable actions, and readable status messaging.
+            </p>
+          </div>
+          <Link href="/#contact" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:bg-orange-400">
+            Contact Support <ArrowRight size={14} />
+          </Link>
+        </div>
+      </section>
+
       <section id="contact" className="relative overflow-hidden bg-[#0B1B3A] px-5 py-20 text-white md:px-8">
         <div className="absolute right-0 top-0 h-full w-1/2 bg-[radial-gradient(circle_at_70%_45%,rgba(14,165,233,0.2),transparent_35%)]" />
         <div className="relative mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.75fr_1.25fr]">
@@ -654,9 +778,9 @@ export default function HomePage() {
               A national platform for microbial genomics, MAYA results, and geospatial intelligence for a healthier and more resilient India.
             </p>
           </div>
-          <FooterColumn title="Platform" links={['Dashboard', 'Analysis', 'Organism Atlas', 'MAYA Results']} />
-          <FooterColumn title="Resources" links={['Blog', 'Create Account', 'User Guide', 'Downloads']} />
-          <FooterColumn title="About" links={['Our Projects', 'Our Team', 'Contact Us', 'Accessibility']} />
+          {footerSections.map((section) => (
+            <FooterColumn key={section.title} title={section.title} links={section.links} pathname={pathname} />
+          ))}
         </div>
         <div className="mx-auto flex max-w-7xl flex-col gap-4 pt-6 text-xs font-bold text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <span>2026 BMGA. All rights reserved.</span>
@@ -684,15 +808,19 @@ function ContactLine({ icon: Icon, label, value }: { icon: LucideIcon; label: st
   );
 }
 
-function FooterColumn({ title, links }: { title: string; links: string[] }) {
+function FooterColumn({ title, links, pathname }: { title: string; links: FooterLink[]; pathname: string }) {
   return (
     <div>
       <h3 className="text-sm font-black">{title}</h3>
       <ul className="mt-4 space-y-3 text-sm font-medium text-slate-400">
         {links.map((link) => (
-          <li key={link}>
-            <Link href={footerHref(link)} className="transition hover:text-orange-300">
-              {link}
+          <li key={link.href}>
+            <Link
+              href={link.href}
+              aria-current={isActiveFooterLink(pathname, link.href) ? 'page' : undefined}
+              className={`transition hover:text-orange-300 ${isActiveFooterLink(pathname, link.href) ? 'text-orange-300' : ''}`}
+            >
+              {link.label}
             </Link>
           </li>
         ))}
@@ -701,18 +829,8 @@ function FooterColumn({ title, links }: { title: string; links: string[] }) {
   );
 }
 
-function footerHref(link: string) {
-  const anchors: Record<string, string> = {
-    Dashboard: '/dashboard',
-    Analysis: '#analysis',
-    'Organism Atlas': '/dashboard#india-atlas',
-    'MAYA Results': '/dashboard',
-    'Our Projects': '#projects',
-    Blog: '/blog',
-    'Create Account': '/register',
-    'Our Team': '/team',
-    'Contact Us': '#contact',
-  };
-
-  return anchors[link] || '#home';
+function isActiveFooterLink(pathname: string, href: string) {
+  const [hrefPath, hash] = href.split('#');
+  if (hash) return false;
+  return hrefPath === pathname;
 }
