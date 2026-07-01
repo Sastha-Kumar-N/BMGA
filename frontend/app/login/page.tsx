@@ -3,6 +3,8 @@ import { signIn } from "next-auth/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import BrandLogo from "../components/BrandLogo";
+import { BRAND_FULL_NAME } from "../lib/brand";
 
 /*
 Colour scheme from the image:
@@ -60,11 +62,7 @@ export default function LoginPage() {
         }}
       >
         <div className="flex flex-col items-center mb-8">
-          {/* Simple logo */}
-          <svg viewBox="0 0 40 40" className="mb-2" width={48} height={48}>
-            <circle cx="20" cy="20" r="20" fill="#ff9200" />
-            <text x="50%" y="57%" textAnchor="middle" fill="#fff" fontSize="13" fontWeight="bold" fontFamily="Arial">BG</text>
-          </svg>
+          <BrandLogo size="lg" className="mb-2" />
           <h1
             className="text-[2rem] font-extrabold text-center mb-2"
             style={{ color: "#313e6a", fontFamily: "Inter, Arial" }}
@@ -72,7 +70,7 @@ export default function LoginPage() {
             BMGA Account Login
           </h1>
           <p className="text-[#313e6a]/70 text-center text-sm max-w-xs">
-            Sign in to submit organism metadata, write blog posts, or manage admin review workflows.
+            Sign in to {BRAND_FULL_NAME} to submit organism metadata, write blog posts, or manage admin review workflows.
           </p>
         </div>
 

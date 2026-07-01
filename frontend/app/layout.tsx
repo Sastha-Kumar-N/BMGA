@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
 import AuthProvider from "./context/AuthProvider";
+import { BRAND_FULL_NAME } from "./lib/brand";
 
 // Metadata stays here on the Server side
 export const metadata: Metadata = {
-  title: "Genomic Platform",
-  description: "Advanced bioinformatics repository",
+  title: BRAND_FULL_NAME,
+  description: "Bharat Microbial Genome Atlas microbial genomics repository, dashboard, and MAYA result portal.",
 };
 
 export default function RootLayout({

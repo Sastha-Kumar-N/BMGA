@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../lib/api-client';
+import { BRAND_FULL_NAME } from '../lib/brand';
+import BrandLogo from '../components/BrandLogo';
 import type { AtlasStrain } from '../components/IndiaOrganismAtlas';
 
 const IndiaOrganismAtlas = dynamic(() => import('../components/IndiaOrganismAtlas'), {
@@ -325,14 +327,8 @@ export default function Dashboard() {
   return (
     <div className="flex min-h-screen bg-[#f6f8fb] text-slate-900 selection:bg-orange-500/20">
       <aside className="hidden w-72 shrink-0 flex-col border-r border-white/10 bg-[#0B1B3A] px-5 py-6 text-white xl:flex">
-        <button onClick={() => setSelectedStrainId('')} className="mb-8 flex items-center gap-3 text-left">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-500 text-white shadow-lg shadow-orange-500/20">
-            <Dna size={22} />
-          </span>
-          <span>
-            <span className="block text-xl font-black tracking-tight">BMGA</span>
-            <span className="block text-[9px] font-black uppercase tracking-widest text-orange-300">Bharat Genome Atlas</span>
-          </span>
+        <button onClick={() => setSelectedStrainId('')} className="mb-8 text-left" aria-label={`${BRAND_FULL_NAME} dashboard home`}>
+          <BrandLogo variant="light" />
         </button>
 
         <nav className="space-y-2">

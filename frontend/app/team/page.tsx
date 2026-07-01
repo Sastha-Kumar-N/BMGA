@@ -7,17 +7,18 @@ import {
   BrainCircuit,
   Building2,
   Code2,
-  Dna,
   GraduationCap,
   Mail,
   Network,
   ShieldAlert,
   Sparkles,
 } from 'lucide-react';
+import BrandLogo from '../components/BrandLogo';
+import { BRAND_FULL_NAME } from '../lib/brand';
 
 export const metadata: Metadata = {
-  title: 'Our Team | BMGA/BGDB',
-  description: 'Meet the scientific leadership, developers, and student contributors behind BMGA/BGDB.',
+  title: `Our Team | ${BRAND_FULL_NAME}`,
+  description: `Meet the scientific leadership, developers, and student contributors behind ${BRAND_FULL_NAME}.`,
 };
 
 type CoreMember = {
@@ -49,7 +50,7 @@ const leadershipMembers: CoreMember[] = [
   {
     name: 'Dr. Sabarinath Subramaniam',
     title: 'Director, Sivasakthi Science Foundation (SSF)',
-    bio: "Science leader with over 25 years of experience across Biotechnology, Neuroscience, Bioinformatics, and Plant Genomics. Guides BGDB's scientific vision, research partnerships, data strategy, and long-term roadmap.",
+    bio: "Science leader with over 25 years of experience across Biotechnology, Neuroscience, Bioinformatics, and Plant Genomics. Guides BMGA's scientific vision, research partnerships, data strategy, and long-term roadmap.",
     email: 'shabari@sivasakthifoundation.org',
     portraitAlt: 'Portrait of Dr. Sabarinath Subramaniam',
     tags: ['Scientific Vision', 'Research Partnerships', 'Data Strategy'],
@@ -62,7 +63,7 @@ const researchMembers: CoreMember[] = [
     name: 'Sastha Kumar N',
     title: 'Research Scholar & Developer',
     affiliation: 'Amrita School of Biotechnology & Sivasakthi Science Foundation',
-    bio: 'PhD Scholar bridging AI and life sciences. Builds data platforms, machine learning workflows, and web tools for genomics, education, agriculture, and health applications. Contributes to BGDB through platform architecture, data integration, user experience design, and computational biology workflows.',
+    bio: 'PhD Scholar bridging AI and life sciences. Builds data platforms, machine learning workflows, and web tools for genomics, education, agriculture, and health applications. Contributes to BMGA through platform architecture, data integration, user experience design, and computational biology workflows.',
     email: 'admin@bgdb.org',
     portraitAlt: 'Portrait of Sastha Kumar N',
     tags: ['Platform Architecture', 'AI + Life Sciences', 'Computational Biology'],
@@ -99,14 +100,8 @@ export default function TeamPage() {
     <main className="min-h-screen bg-white text-[#0B1B3A] selection:bg-orange-500/20">
       <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0B1B3A]/95 text-white shadow-2xl shadow-[#0B1B3A]/10 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-5 py-4 md:px-8">
-          <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-500 text-white shadow-lg shadow-orange-500/25">
-              <Dna size={23} />
-            </span>
-            <span>
-              <span className="block text-xl font-black tracking-tight">BMGA</span>
-              <span className="block text-[9px] font-black uppercase tracking-widest text-orange-300">Bharat Genome Atlas</span>
-            </span>
+          <Link href="/" className="min-w-0" aria-label={`${BRAND_FULL_NAME} home`}>
+            <BrandLogo variant="light" />
           </Link>
 
           <div className="hidden items-center gap-7 text-sm font-black lg:flex">
@@ -132,7 +127,7 @@ export default function TeamPage() {
           <div>
             <h1 className="text-5xl font-black leading-[0.95] tracking-tight md:text-7xl">Our Team</h1>
             <p className="mt-7 max-w-2xl text-base font-medium leading-8 text-slate-300 md:text-lg">
-              Meet the scientific leadership, developers, and student contributors behind BMGA/BGDB.
+              Meet the scientific leadership, developers, and student contributors behind {BRAND_FULL_NAME}.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link href="#leadership" className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-6 py-4 text-sm font-black text-white shadow-xl shadow-orange-500/25 transition hover:bg-orange-400">
@@ -161,7 +156,7 @@ export default function TeamPage() {
             <div className="relative mt-5 rounded-2xl border border-orange-300/20 bg-orange-500/10 p-5">
               <p className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-orange-200">
                 <Sparkles size={15} />
-                BMGA/BGDB contributor network
+                BMGA contributor network
               </p>
               <p className="mt-3 text-sm font-semibold leading-6 text-slate-300">
                 Scientific direction, platform engineering, and student research effort come together to support a growing genomic knowledge platform.
@@ -174,7 +169,7 @@ export default function TeamPage() {
       <section id="leadership" className="bg-white px-5 py-20 md:px-8">
         <SectionHeader
           title="Leadership"
-          body="Scientific leadership for research partnerships, data quality, and the long-term BMGA/BGDB roadmap."
+          body="Scientific leadership for research partnerships, data quality, and the long-term BMGA roadmap."
         />
         <div className="mx-auto mt-10 grid max-w-7xl gap-6 lg:grid-cols-1">
           {leadershipMembers.map((member) => (
@@ -209,11 +204,8 @@ export default function TeamPage() {
 
       <footer className="bg-[#07142D] px-5 py-10 text-white md:px-8">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 text-sm font-bold text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-          <Link href="/" className="inline-flex items-center gap-3 text-white">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500">
-              <Dna size={20} />
-            </span>
-            <span>BMGA/BGDB</span>
+          <Link href="/" className="inline-flex min-w-0 items-center gap-3 text-white" aria-label={`${BRAND_FULL_NAME} home`}>
+            <BrandLogo variant="light" size="sm" />
           </Link>
           <Link href="/#contact" className="transition hover:text-orange-300">Contact the team</Link>
         </div>

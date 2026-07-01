@@ -27,6 +27,8 @@ import {
   Waves,
 } from 'lucide-react';
 import { apiPath } from './lib/api-client';
+import { BRAND_FULL_NAME, BRAND_TAGLINE } from './lib/brand';
+import BrandLogo from './components/BrandLogo';
 import type { HomeMapStrain } from './components/HomeIndiaMap';
 
 const HomeIndiaMap = dynamic(() => import('./components/HomeIndiaMap'), {
@@ -152,8 +154,8 @@ const projectCards: Array<{
   surface: string;
 }> = [
   {
-    title: 'Bharat Genome Database',
-    body: 'Bharat Genome Database (BGDB) is a comprehensive platform dedicated to providing access to genomic resources, tools, and data specific to the diverse flora of India. Our mission is to empower researchers, students, and the scientific community with high-quality genomic information and innovative bioinformatics tools..',
+    title: BRAND_FULL_NAME,
+    body: `${BRAND_FULL_NAME} is a comprehensive microbial genomics platform dedicated to organism registry, MAYA result access, and geospatial source intelligence across India. Our mission is to empower researchers, students, and the scientific community with high-quality microbial genome information and practical bioinformatics tools.`,
     icon: ShieldAlert,
     surface: 'from-[#123464] via-[#0B1B3A] to-[#06122A]',
   },
@@ -406,14 +408,8 @@ export default function HomePage() {
     <main id="home" className="min-h-screen bg-white text-[#0B1B3A] selection:bg-orange-500/20">
       <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0B1B3A]/95 text-white shadow-2xl shadow-[#0B1B3A]/10 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-5 py-4 md:px-8">
-          <Link href="#home" className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-500 text-white shadow-lg shadow-orange-500/25">
-              <Dna size={23} />
-            </span>
-            <span>
-              <span className="block text-xl font-black tracking-tight">BMGA</span>
-              <span className="block text-[9px] font-black uppercase tracking-widest text-orange-300">Bharat Genome Atlas</span>
-            </span>
+          <Link href="#home" className="min-w-0" aria-label={`${BRAND_FULL_NAME} home`}>
+            <BrandLogo variant="light" />
           </Link>
 
           <div className="hidden items-center gap-7 text-sm font-black lg:flex">
@@ -765,15 +761,7 @@ export default function HomePage() {
       <footer className="bg-[#07142D] px-5 py-12 text-white md:px-8">
         <div className="mx-auto grid max-w-7xl gap-10 border-b border-white/10 pb-10 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr]">
           <div>
-            <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-500 text-white">
-                <Dna size={22} />
-              </span>
-              <span>
-                <span className="block text-xl font-black">BMGA</span>
-                <span className="block text-[9px] font-black uppercase tracking-widest text-orange-300">Bharat Genome Atlas</span>
-              </span>
-            </div>
+            <BrandLogo variant="light" />
             <p className="mt-5 max-w-sm text-sm font-medium leading-7 text-slate-400">
               A national platform for microbial genomics, MAYA results, and geospatial intelligence for a healthier and more resilient India.
             </p>
@@ -784,7 +772,7 @@ export default function HomePage() {
         </div>
         <div className="mx-auto flex max-w-7xl flex-col gap-4 pt-6 text-xs font-bold text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <span>2026 BMGA. All rights reserved.</span>
-          <span>Science. Surveillance. Sustainability.</span>
+          <span>{BRAND_TAGLINE}</span>
         </div>
         <div className="mt-8 flex h-1.5">
           <div className="flex-1 bg-orange-500" />

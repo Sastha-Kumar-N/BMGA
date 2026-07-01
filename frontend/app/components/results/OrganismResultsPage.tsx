@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BarChart3, Dna, Home, LayoutDashboard, RefreshCcw, ShieldAlert } from "lucide-react";
+import { BarChart3, Home, LayoutDashboard, RefreshCcw, ShieldAlert } from "lucide-react";
 import { apiPath } from "../../lib/api-client";
+import BrandLogo from "../BrandLogo";
 import GenomeSummaryPanel from "./GenomeSummaryPanel";
 import ToolResultsTabs from "./ToolResultsTabs";
 import { OrganismResultsResponse } from "./types";
@@ -90,9 +91,7 @@ export default function OrganismResultsPage({ organismId }: { organismId: string
       <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="shrink-0 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 p-2 text-white shadow-lg shadow-orange-500/20">
-              <Dna size={22} />
-            </div>
+            <BrandLogo showText={false} size="md" />
             <div className="min-w-0">
               <p className="text-[9px] font-black uppercase tracking-widest text-orange-500">MAYA Results</p>
               <p className="truncate text-lg font-black italic tracking-tighter text-[#0B1B3A]">

@@ -1,4 +1,4 @@
-# BMGA / Bharat Genome Atlas
+# BMGA / Bharat Microbial Genome Atlas
 
 BMGA is a Next.js + Express + Prisma + PostgreSQL platform for microbial genome registry, dashboard analytics, and organism-level bioinformatics results.
 

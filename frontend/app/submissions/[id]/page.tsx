@@ -6,6 +6,8 @@ import { signIn, useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Dna, Home, LayoutDashboard, Lock, UserRound } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
+import { BRAND_FULL_NAME } from '../../lib/brand';
+import BrandLogo from '../../components/BrandLogo';
 import {
   ReviewerNotesPanel,
   SubmissionFilesPanel,
@@ -221,8 +223,8 @@ function Shell({ children }: { children: React.ReactNode }) {
     <main className="min-h-screen bg-[#f6f8fb] px-5 py-8 text-[#0B1B3A] md:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Link href="/" className="inline-flex items-center gap-3 text-sm font-black uppercase tracking-widest text-orange-600">
-            <Dna size={22} /> BMGA
+          <Link href="/" className="inline-flex min-w-0 items-center gap-3" aria-label={`${BRAND_FULL_NAME} home`}>
+            <BrandLogo size="sm" />
           </Link>
           <div className="flex flex-wrap gap-2">
             <Link href="/" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#0B1B3A] shadow-sm transition hover:border-orange-300 hover:text-orange-600">

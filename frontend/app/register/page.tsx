@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import { useState } from 'react';
-import { AlertCircle, CheckCircle2, Dna, UserPlus } from 'lucide-react';
+import { AlertCircle, CheckCircle2, UserPlus } from 'lucide-react';
 import { apiPath } from '../lib/api-client';
+import { BRAND_FULL_NAME } from '../lib/brand';
+import BrandLogo from '../components/BrandLogo';
 
 const AFFILIATIONS = [
   { value: 'RESEARCH', label: 'Research' },
@@ -55,8 +57,8 @@ export default function RegisterPage() {
     <main className="min-h-screen bg-[#f6f8fb] px-5 py-10 text-[#0B1B3A]">
       <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl items-center gap-10 lg:grid-cols-[0.95fr_1.05fr]">
         <section>
-          <Link href="/" className="inline-flex items-center gap-3 text-sm font-black uppercase tracking-widest text-orange-600">
-            <Dna size={22} /> Bharat Genome Atlas
+          <Link href="/" className="inline-flex min-w-0 items-center gap-3" aria-label={`${BRAND_FULL_NAME} home`}>
+            <BrandLogo size="sm" />
           </Link>
           <h1 className="mt-8 max-w-xl text-5xl font-black leading-tight tracking-tight md:text-6xl">
             Create a verified organism data account.
