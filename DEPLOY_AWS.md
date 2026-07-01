@@ -1,6 +1,12 @@
-# BMGA/BGDB AWS Production Deployment Security Checklist
+# BMGA AWS Production Deployment Security Checklist
 
 This application handles sensitive biological, user, and admin data. Production deployments must use secure environment variables, private networking, HTTPS, strict CORS, audit logging, and monitored traffic controls.
+
+For the EC2 + S3 deployment path requested for BMGA, follow:
+
+```text
+AWS_EC2_S3_DEPLOYMENT.md
+```
 
 ## Required Secrets And Configuration
 
@@ -18,6 +24,10 @@ Required production values:
 - `NEXTAUTH_URL=https://your-domain.example`
 - `BMGA_ADMIN_EMAIL`
 - `BMGA_ADMIN_PASSWORD`
+- `STORAGE_DRIVER=s3` for production uploads
+- `S3_BUCKET`
+- `S3_REGION`
+- `S3_PREFIX`
 - `SEED_DEMO_USER=false`
 - `SEED_DEMO_DATA=false`
 - `BMGA_DEMO_PASSWORD` only if demo accounts are explicitly allowed in that environment
@@ -163,6 +173,17 @@ Use CloudFront in front of the frontend if static asset caching and edge TLS ter
 ## Upload And File Security
 
 The API validates import file extensions and size before parsing. Store uploaded results outside the public web root. Never execute uploaded files.
+
+Production file storage should use:
+
+```text
+STORAGE_DRIVER=s3
+S3_BUCKET=<private bucket>
+S3_REGION=<bucket region>
+S3_PREFIX=bmga-prod
+```
+
+The backend stores uploaded MAYA/result files as private S3 objects and streams downloads through authenticated application routes. Keep S3 public access blocked and grant the EC2 instance role only the object actions needed for the configured prefix.
 
 For production malware scanning, store uploads in S3 and use an antivirus scanning workflow such as S3 event -> Lambda/ECS scanner -> quarantine or release tag.
 

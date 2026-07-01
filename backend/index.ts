@@ -6,7 +6,6 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import fs from 'fs';
 import path from 'path';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
@@ -15,6 +14,7 @@ import { createHash, randomUUID } from 'crypto';
 import { getOrganismById } from './services/organismService';
 import { getOrganismResults, getOrganismToolResult, getToolOutputFile, saveNormalizedToolRun } from './services/resultService';
 import { normalizeToolName } from './services/resultsParsers/toolDefinitions';
+import { configuredStorageDriver, deleteStoredFiles, saveUploadedResultFile, sendStoredFileDownload } from './services/objectStorage';
 // --- Runtime Configuration --------------------------------------------------
 const isProduction = process.env.NODE_ENV === 'production';
 const allowInsecureDevSecrets = process.env.ALLOW_INSECURE_DEV_SECRETS === 'true';
@@ -25,7 +25,6 @@ const ENABLE_REQUEST_LOGGING = process.env.ENABLE_REQUEST_LOGGING !== 'false';
 const PORT = Number(process.env.PORT || 3001);
 const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || '1mb';
 const MAX_IMPORT_FILE_BYTES = Number(process.env.MAX_IMPORT_FILE_BYTES || 5 * 1024 * 1024);
-const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_ROOT || path.join(process.cwd(), 'uploads'));
 
 const TRUSTED_DEV_ORIGINS = [
   'http://localhost:3000',
@@ -44,6 +43,10 @@ const UNSAFE_SECRET_MARKERS = [
   'password',
 ];
 
+function isPlaceholderSecret(value: string) {
+  return UNSAFE_SECRET_MARKERS.includes(value) || /^dev-local-/i.test(value) || /^replace[_-]?with/i.test(value);
+}
+
 function csvEnv(name: string) {
   return (process.env[name] || '')
     .split(',')
@@ -58,7 +61,7 @@ function numberEnv(name: string, fallback: number) {
 
 function validateSecret(name: string, value: string | undefined, minimumLength = 32) {
   const trimmed = value?.trim() || '';
-  const unsafe = UNSAFE_SECRET_MARKERS.includes(trimmed) || /^dev-local-/i.test(trimmed);
+  const unsafe = isPlaceholderSecret(trimmed);
   if (isProduction && !allowInsecureDevSecrets && (trimmed.length < minimumLength || unsafe)) {
     throw new Error(`${name} must be set to a strong non-placeholder value in production.`);
   }
@@ -949,20 +952,6 @@ function parseDelimitedFile(fileContent: string, fileName: string) {
   return { columns, rows };
 }
 
-function saveUploadedResultFile(organismId: number, toolName: string, fileName: string, fileContent: string) {
-  const safeTool = normalizeToolName(toolName).replace(/[^a-z0-9_]/gi, '_');
-  const safeFile = fileName.replace(/[^a-z0-9_.-]/gi, '_');
-  const uploadDir = path.resolve(UPLOAD_ROOT, 'maya-results', String(organismId), safeTool);
-  const relativeUploadDir = path.relative(UPLOAD_ROOT, uploadDir);
-  if (relativeUploadDir.startsWith('..') || path.isAbsolute(relativeUploadDir)) {
-    throw new Error("Invalid upload path");
-  }
-  fs.mkdirSync(uploadDir, { recursive: true });
-  const outputPath = path.join(uploadDir, `${Date.now()}-${safeFile}`);
-  fs.writeFileSync(outputPath, fileContent, 'utf8');
-  return outputPath;
-}
-
 app.set('trust proxy', process.env.TRUST_PROXY || 1);
 app.use(requestContextMiddleware);
 app.use(securityHeaders);
@@ -1376,12 +1365,7 @@ app.get('/api/organisms/:id/downloads/:tool/:fileId', async (req: Request, res: 
     const file = await getToolOutputFile(prisma, organismId, parseStringParam(req.params.tool), fileId);
     if (!file) return res.status(404).json({ error: "File not found" });
 
-    const resolvedPath = path.resolve(file.filePath);
-    if (!fs.existsSync(resolvedPath)) {
-      return res.status(404).json({ error: "File path is not available on this server" });
-    }
-
-    res.download(resolvedPath, file.fileName);
+    await sendStoredFileDownload(res, file.filePath, file.fileName);
   } catch (error) {
     console.error("Download Error:", error);
     res.status(500).json({ error: "Failed to download result file" });
@@ -2399,6 +2383,7 @@ app.delete('/api/admin/organisms/:id', requireAdmin, async (req: AuthenticatedRe
     const organism = await prisma.organism.findUnique({
       where: { id: organismId },
       include: {
+        strains: { select: { id: true } },
         _count: {
           select: {
             strains: true,
@@ -2427,6 +2412,40 @@ app.delete('/api/admin/organisms/:id', requireAdmin, async (req: AuthenticatedRe
       return res.status(400).json({ error: "Type the organism scientific name or DELETE to confirm full deletion" });
     }
 
+    const strainIds = organism.strains.map((strain) => strain.id);
+    const [toolOutputFiles, fileAssets] = await Promise.all([
+      prisma.toolOutputFile.findMany({
+        where: { toolRun: { organismId } },
+        select: { filePath: true },
+      }),
+      prisma.fileAsset.findMany({
+        where: {
+          OR: [
+            { strainId: { in: strainIds } },
+            { assembly: { strainId: { in: strainIds } } },
+            { annotationRun: { strainId: { in: strainIds } } },
+            { analysisRun: { strainId: { in: strainIds } } },
+          ],
+        },
+        select: { bucketName: true, objectKey: true },
+      }),
+    ]);
+    const storedFilePaths = [
+      ...toolOutputFiles.map((file) => file.filePath),
+      ...fileAssets.map((file) => `s3://${file.bucketName}/${file.objectKey}`),
+    ];
+    const storageDeleteResult = await deleteStoredFiles(storedFilePaths);
+    if (storageDeleteResult.failed > 0) {
+      await writeAdminLog(req.user?.userId, "ORGANISM_DELETE_ATTEMPT", "Organism", String(organismId), {
+        result: "failure",
+        reason: "stored_file_cleanup_failed",
+        scientificName: organism.scientificName,
+        fileCleanup: storageDeleteResult,
+        statusCode: 500,
+      });
+      return res.status(500).json({ error: "Failed to delete all stored organism files. Database record was preserved for retry." });
+    }
+
     const publishedSubmissionCount = await prisma.organismUpload.count({ where: { publishedOrganismId: organismId } });
     await prisma.$transaction(async (tx) => {
       await tx.organismUpload.updateMany({
@@ -2444,6 +2463,7 @@ app.delete('/api/admin/organisms/:id', requireAdmin, async (req: AuthenticatedRe
       strains: organism._count.strains,
       toolRuns: organism._count.toolRuns,
       affectedPublishedSubmissions: publishedSubmissionCount,
+      fileCleanup: storageDeleteResult,
     });
 
     res.json({ message: "Organism and associated genome/result records deleted" });
@@ -2548,7 +2568,12 @@ app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req:
       return res.status(400).json({ error: validatedFile.error });
     }
     const parsedTable = validatedFile ? parseDelimitedFile(validatedFile.fileContent, validatedFile.fileName) : { columns: [] as string[], rows: [] as Record<string, unknown>[] };
-    const savedFilePath = validatedFile ? saveUploadedResultFile(numericOrganismId, toolName, validatedFile.fileName, validatedFile.fileContent) : undefined;
+    const savedFilePath = validatedFile ? await saveUploadedResultFile({
+      organismId: numericOrganismId,
+      toolName,
+      fileName: validatedFile.fileName,
+      fileContent: validatedFile.fileContent,
+    }) : undefined;
 
     const savedRun = await saveNormalizedToolRun(prisma, numericOrganismId, numericStrainId, {
       toolName,
@@ -2576,6 +2601,7 @@ app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req:
       strainId: numericStrainId,
       toolName: normalizeToolName(toolName),
       fileName: validatedFile?.fileName,
+      storageDriver: savedFilePath ? configuredStorageDriver() : undefined,
     });
     res.status(201).json({ message: "MAYA result ingested", toolRunId: savedRun.id });
   } catch (error) {

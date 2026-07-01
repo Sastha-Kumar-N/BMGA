@@ -1,0 +1,95 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      BMGA_DOMAIN: ${BMGA_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ../../frontend
+    restart: unless-stopped
+    environment:
+      ALLOW_INSECURE_DEV_SECRETS: "false"
+      BACKEND_INTERNAL_URL: http://backend:3001
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ../../backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ALLOW_INSECURE_DEV_SECRETS: "false"
+      APP_NAME: ${APP_NAME:-bmga}
+      APP_VERSION: ${APP_VERSION:-}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      FRONTEND_URL: ${FRONTEND_URL}
+      PORT: 3001
+      TRUST_PROXY: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENABLE_REQUEST_LOGGING: "true"
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+      CONTACT_RATE_LIMIT_MAX: ${CONTACT_RATE_LIMIT_MAX:-5}
+      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-10}
+      ADMIN_RATE_LIMIT_MAX: ${ADMIN_RATE_LIMIT_MAX:-300}
+      IMPORT_RATE_LIMIT_MAX: ${IMPORT_RATE_LIMIT_MAX:-40}
+      MAX_IMPORT_FILE_BYTES: ${MAX_IMPORT_FILE_BYTES:-5242880}
+      STORAGE_DRIVER: s3
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${S3_REGION}
+      S3_PREFIX: ${S3_PREFIX:-bmga-prod}
+      S3_KMS_KEY_ID: ${S3_KMS_KEY_ID:-}
+      BMGA_ADMIN_EMAIL: ${BMGA_ADMIN_EMAIL}
+      BMGA_ADMIN_PASSWORD: ${BMGA_ADMIN_PASSWORD}
+      SEED_DEMO_USER: "false"
+      SEED_DEMO_DATA: "false"
+      ADMIN_ALLOWED_IPS: ${ADMIN_ALLOWED_IPS:-}
+      ADMIN_EMAIL_DOMAINS: ${ADMIN_EMAIL_DOMAINS:-}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  migrate:
+    build:
+      context: ../../backend
+      target: builder
+    profiles:
+      - migrate
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      ALLOW_INSECURE_DEV_SECRETS: "false"
+      APP_NAME: ${APP_NAME:-bmga}
+      APP_VERSION: ${APP_VERSION:-}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      BMGA_ADMIN_EMAIL: ${BMGA_ADMIN_EMAIL}
+      BMGA_ADMIN_PASSWORD: ${BMGA_ADMIN_PASSWORD}
+      SEED_DEMO_USER: "false"
+      SEED_DEMO_DATA: "false"
+    command: ["npm", "run", "docker:migrate"]
+
+volumes:
+  caddy_data:
+  caddy_config:

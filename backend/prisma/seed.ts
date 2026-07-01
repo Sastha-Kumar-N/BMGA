@@ -16,9 +16,13 @@ const allowInsecureDevSecrets = process.env.ALLOW_INSECURE_DEV_SECRETS === 'true
 const seedDemoUser = process.env.SEED_DEMO_USER === 'true' || process.env.SEED_DEMO_DATA === 'true';
 const seedDemoData = process.env.SEED_DEMO_DATA === 'true';
 
+function isPlaceholderSecret(value: string) {
+  return /^replace[_-]?with/i.test(value) || /^dev-local-/i.test(value) || ['change-me', 'change-me-in-production', 'secret', 'password'].includes(value);
+}
+
 function requiredSecret(name: string, fallback: string) {
   const value = process.env[name] || fallback;
-  if (isProduction && !allowInsecureDevSecrets && (!process.env[name] || value === fallback || value.length < 16)) {
+  if (isProduction && !allowInsecureDevSecrets && (!process.env[name] || value === fallback || value.length < 16 || isPlaceholderSecret(value))) {
     throw new Error(`${name} must be set to a strong non-placeholder value before production seeding.`);
   }
   return value;
@@ -26,7 +30,7 @@ function requiredSecret(name: string, fallback: string) {
 
 function requiredEmail(name: string, fallback: string) {
   const value = process.env[name] || fallback;
-  if (isProduction && !allowInsecureDevSecrets && (!process.env[name] || value === fallback)) {
+  if (isProduction && !allowInsecureDevSecrets && (!process.env[name] || value === fallback || value === 'admin@example.org')) {
     throw new Error(`${name} must be set before production seeding.`);
   }
   return value;

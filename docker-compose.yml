@@ -22,6 +22,8 @@ services:
     environment:
       NODE_ENV: ${BACKEND_NODE_ENV:-development}
       ALLOW_INSECURE_DEV_SECRETS: ${ALLOW_INSECURE_DEV_SECRETS:-true}
+      APP_NAME: ${APP_NAME:-bmga}
+      APP_VERSION: ${APP_VERSION:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/bmga?schema=public}
       JWT_SECRET: ${JWT_SECRET:-dev-local-jwt-secret-change-before-production-64-characters}
       BMGA_ADMIN_EMAIL: ${BMGA_ADMIN_EMAIL:-maya.admin@bmga.local}
@@ -41,6 +43,8 @@ services:
     environment:
       NODE_ENV: ${BACKEND_NODE_ENV:-development}
       ALLOW_INSECURE_DEV_SECRETS: ${ALLOW_INSECURE_DEV_SECRETS:-true}
+      APP_NAME: ${APP_NAME:-bmga}
+      APP_VERSION: ${APP_VERSION:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/bmga?schema=public}
       JWT_SECRET: ${JWT_SECRET:-dev-local-jwt-secret-change-before-production-64-characters}
       BMGA_ADMIN_EMAIL: ${BMGA_ADMIN_EMAIL:-maya.admin@bmga.local}
@@ -57,6 +61,11 @@ services:
       ADMIN_RATE_LIMIT_MAX: ${ADMIN_RATE_LIMIT_MAX:-300}
       IMPORT_RATE_LIMIT_MAX: ${IMPORT_RATE_LIMIT_MAX:-40}
       MAX_IMPORT_FILE_BYTES: ${MAX_IMPORT_FILE_BYTES:-5242880}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_PREFIX: ${S3_PREFIX:-bmga}
+      S3_KMS_KEY_ID: ${S3_KMS_KEY_ID:-}
     ports:
       - "3001:3001"
     depends_on:
