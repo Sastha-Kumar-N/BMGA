@@ -121,7 +121,7 @@ export default function AdminUsersPage() {
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left">
+            <table className="w-full min-w-[1040px] text-left">
               <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
                 <tr>
                   <th className="px-5 py-4">User</th>
@@ -130,6 +130,7 @@ export default function AdminUsersPage() {
                   <th className="px-5 py-4">Submissions</th>
                   <th className="px-5 py-4">Joined</th>
                   <th className="px-5 py-4">Password Reset</th>
+                  <th className="px-5 py-4">Deletion</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -199,6 +200,11 @@ export default function AdminUsersPage() {
                           <KeyRound size={13} /> Reset
                         </button>
                       )}
+                    </td>
+                    <td className="px-5 py-4">
+                      <Link href="/admin/cockpit#delete-management" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-[#0B1B3A] transition hover:border-orange-300 hover:text-orange-600">
+                        Manage in Cockpit
+                      </Link>
                     </td>
                   </tr>
                 ))}

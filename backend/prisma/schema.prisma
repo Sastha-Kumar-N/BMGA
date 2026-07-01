@@ -24,8 +24,11 @@ enum UserAffiliation {
 
 enum ApprovalStatus {
   PENDING
+  UNDER_REVIEW
+  NEEDS_CHANGES
   APPROVED
   REJECTED
+  ARCHIVED
 }
 
 enum ContactMessageStatus {
@@ -53,6 +56,8 @@ model User {
   updatedAt                DateTime         @updatedAt
   organismUploads          OrganismUpload[] @relation("UserOrganismUploads")
   reviewedOrganismUploads  OrganismUpload[] @relation("ReviewedOrganismUploads")
+  submissionStatusHistory  SubmissionStatusHistory[] @relation("SubmissionStatusActors")
+  submissionReviewerNotes  SubmissionReviewerNote[] @relation("SubmissionReviewerNoteAuthors")
   blogPosts                BlogPost[]       @relation("UserBlogPosts")
   reviewedBlogPosts        BlogPost[]       @relation("ReviewedBlogPosts")
   adminLogs                AdminLog[]       @relation("AdminLogs")
@@ -169,12 +174,50 @@ model OrganismUpload {
 
   submittedBy            User           @relation("UserOrganismUploads", fields: [submittedById], references: [id], onDelete: Cascade)
   reviewedBy             User?          @relation("ReviewedOrganismUploads", fields: [reviewedById], references: [id], onDelete: SetNull)
+  statusHistory          SubmissionStatusHistory[]
+  reviewerNotes          SubmissionReviewerNote[]
 
   @@index([submittedById])
   @@index([reviewedById])
   @@index([status])
   @@index([scientificName])
   @@index([strainName])
+}
+
+model SubmissionStatusHistory {
+  id                 String         @id @default(uuid())
+  submissionId       String
+  status             String
+  actorId            String?
+  note               String?
+  visibleToSubmitter Boolean        @default(true)
+  createdAt          DateTime       @default(now())
+
+  submission         OrganismUpload @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  actor              User?          @relation("SubmissionStatusActors", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([submissionId])
+  @@index([actorId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SubmissionReviewerNote {
+  id                 String         @id @default(uuid())
+  submissionId       String
+  authorId           String?
+  message            String
+  visibleToSubmitter Boolean        @default(true)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  submission         OrganismUpload @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  author             User?          @relation("SubmissionReviewerNoteAuthors", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([submissionId])
+  @@index([authorId])
+  @@index([visibleToSubmitter])
+  @@index([createdAt])
 }
 
 model BlogPost {
@@ -210,7 +253,9 @@ model AdminLog {
   admin       User?    @relation("AdminLogs", fields: [adminId], references: [id], onDelete: SetNull)
 
   @@index([adminId])
+  @@index([action])
   @@index([targetType])
+  @@index([targetType, targetId, createdAt])
   @@index([createdAt])
 }
 

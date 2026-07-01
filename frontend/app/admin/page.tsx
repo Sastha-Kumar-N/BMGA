@@ -417,20 +417,40 @@ export default function AdminPortal() {
           )}
 
           {activeTab === 'metadata' && (
-            <form onSubmit={handleUpdateOrganismMetadata} className="space-y-6">
-              <SectionTitle title="Edit Organism Metadata" subtitle="Patch taxonomic annotations and public notes for an existing organism." />
-              <SelectInput label="Organism" value={metadataForm.organismId} onChange={(value) => setMetadataForm({ ...metadataForm, organismId: value })} options={organisms.map((organism) => ({ value: organism.id.toString(), label: organism.scientificName }))} />
-              <div className="grid gap-5 md:grid-cols-2">
-                <TextInput label="Display Name" value={metadataForm.displayName} onChange={(value) => setMetadataForm({ ...metadataForm, displayName: value })} />
-                <TextInput label="Taxonomy ID" value={metadataForm.taxonomyId} onChange={(value) => setMetadataForm({ ...metadataForm, taxonomyId: value })} />
-                <TextInput label="Phylum" value={metadataForm.phylum} onChange={(value) => setMetadataForm({ ...metadataForm, phylum: value })} />
-                <TextInput label="Class" value={metadataForm.className} onChange={(value) => setMetadataForm({ ...metadataForm, className: value })} />
-                <TextInput label="Order" value={metadataForm.orderName} onChange={(value) => setMetadataForm({ ...metadataForm, orderName: value })} />
-                <TextInput label="Family" value={metadataForm.family} onChange={(value) => setMetadataForm({ ...metadataForm, family: value })} />
-              </div>
-              <TextArea label="Description" value={metadataForm.description} onChange={(value) => setMetadataForm({ ...metadataForm, description: value })} />
-              <PrimaryButton label="Update Organism Metadata" loading={status.type === 'loading'} />
-            </form>
+            <div className="space-y-6">
+              <form onSubmit={handleUpdateOrganismMetadata} className="space-y-6">
+                <SectionTitle title="Edit Organism Metadata" subtitle="Patch taxonomic annotations and public notes for an existing organism." />
+                <SelectInput label="Organism" value={metadataForm.organismId} onChange={(value) => setMetadataForm({ ...metadataForm, organismId: value })} options={organisms.map((organism) => ({ value: organism.id.toString(), label: organism.scientificName }))} />
+                <div className="grid gap-5 md:grid-cols-2">
+                  <TextInput label="Display Name" value={metadataForm.displayName} onChange={(value) => setMetadataForm({ ...metadataForm, displayName: value })} />
+                  <TextInput label="Taxonomy ID" value={metadataForm.taxonomyId} onChange={(value) => setMetadataForm({ ...metadataForm, taxonomyId: value })} />
+                  <TextInput label="Phylum" value={metadataForm.phylum} onChange={(value) => setMetadataForm({ ...metadataForm, phylum: value })} />
+                  <TextInput label="Class" value={metadataForm.className} onChange={(value) => setMetadataForm({ ...metadataForm, className: value })} />
+                  <TextInput label="Order" value={metadataForm.orderName} onChange={(value) => setMetadataForm({ ...metadataForm, orderName: value })} />
+                  <TextInput label="Family" value={metadataForm.family} onChange={(value) => setMetadataForm({ ...metadataForm, family: value })} />
+                </div>
+                <TextArea label="Description" value={metadataForm.description} onChange={(value) => setMetadataForm({ ...metadataForm, description: value })} />
+                <PrimaryButton label="Update Organism Metadata" loading={status.type === 'loading'} />
+              </form>
+
+              <section className="rounded-3xl border border-orange-200 bg-orange-50 p-6">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Delete Management</p>
+                    <h3 className="mt-1 text-2xl font-black tracking-tight text-[#0B1B3A]">Destructive Actions Are Centralized</h3>
+                    <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-orange-800">
+                      Full organism deletion is handled from the Admin Cockpit danger section with searchable records, typed confirmation, server-side safety checks, and audit logs.
+                    </p>
+                  </div>
+                  <Link
+                    href="/admin/cockpit#delete-management"
+                    className="inline-flex items-center justify-center rounded-2xl bg-[#0B1B3A] px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg transition hover:bg-orange-500"
+                  >
+                    Open Delete Management
+                  </Link>
+                </div>
+              </section>
+            </div>
           )}
 
           {activeTab === 'maya' && (
@@ -477,6 +497,7 @@ export default function AdminPortal() {
           )}
         </section>
       </div>
+
     </div>
   );
 }

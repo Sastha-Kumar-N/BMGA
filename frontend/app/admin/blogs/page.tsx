@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, BookOpenCheck, CheckCircle2, Trash2, XCircle } from 'lucide-react';
+import { AlertCircle, BookOpenCheck, CheckCircle2, XCircle } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 
 type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -50,7 +50,8 @@ export default function AdminBlogsPage() {
       const response = await fetch(apiPath('/admin/blog-posts'), { headers, cache: 'no-store' });
       const data = response.ok ? await response.json() as AdminBlogPost[] : [];
       setPosts(data);
-      const first = data.find((item) => item.status === 'PENDING') || data[0];
+      const preferredId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('selected') : '';
+      const first = data.find((item) => item.id === preferredId) || data.find((item) => item.status === 'PENDING') || data[0];
       if (first) selectPost(first);
       setMessage({ type: 'idle', text: '' });
     } catch (error) {
@@ -84,14 +85,14 @@ export default function AdminBlogsPage() {
     }
   };
 
-  const runAction = async (action: 'approve' | 'reject' | 'delete') => {
+  const runAction = async (action: 'approve' | 'reject') => {
     if (!selected) return;
-    setMessage({ type: 'loading', text: `${action === 'delete' ? 'Deleting' : action === 'approve' ? 'Approving' : 'Rejecting'} blog post...` });
+    setMessage({ type: 'loading', text: `${action === 'approve' ? 'Approving' : 'Rejecting'} blog post...` });
     try {
-      const response = await fetch(apiPath(`/admin/blog-posts/${selected.id}${action === 'delete' ? '' : `/${action}`}`), {
-        method: action === 'delete' ? 'DELETE' : 'POST',
+      const response = await fetch(apiPath(`/admin/blog-posts/${selected.id}/${action}`), {
+        method: 'POST',
         headers,
-        body: action === 'delete' ? undefined : JSON.stringify({ reviewNote }),
+        body: JSON.stringify({ reviewNote }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Failed to ${action} blog post`);
@@ -153,7 +154,12 @@ export default function AdminBlogsPage() {
                     <h2 className="text-2xl font-black tracking-tight">Review Blog Post</h2>
                     <p className="mt-1 text-sm font-bold text-slate-500">Submitted {new Date(selected.createdAt).toLocaleString()}</p>
                   </div>
-                  <StatusBadge status={selected.status} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={selected.status} />
+                    <Link href={`/admin/blogs/${selected.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-[#0B1B3A] hover:border-orange-300 hover:text-orange-600">
+                      Detail Page
+                    </Link>
+                  </div>
                 </div>
 
                 <label className="block">
@@ -179,9 +185,9 @@ export default function AdminBlogsPage() {
                   <button onClick={() => runAction('reject')} disabled={message.type === 'loading'} className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-red-700 disabled:opacity-50">
                     <XCircle size={15} /> Reject
                   </button>
-                  <button onClick={() => runAction('delete')} disabled={message.type === 'loading'} className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-black uppercase tracking-widest text-red-700 hover:bg-red-100 disabled:opacity-50">
-                    <Trash2 size={15} /> Delete
-                  </button>
+                  <Link href="/admin/cockpit#delete-management" className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black uppercase tracking-widest text-[#0B1B3A] hover:border-orange-300 hover:text-orange-600">
+                    Delete Management
+                  </Link>
                 </div>
               </div>
             ) : (

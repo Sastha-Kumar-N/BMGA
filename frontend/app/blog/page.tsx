@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { BookOpenText, PenLine } from 'lucide-react';
+import { BookOpenText, Home, LayoutDashboard, PenLine } from 'lucide-react';
 import { apiPath } from '../lib/api-client';
 
 type BlogPost = {
@@ -52,9 +52,17 @@ export default function BlogPage() {
               Public posts appear here only after admin review and approval.
             </p>
           </div>
-          <Link href="/blog/create" className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-500/25">
-            <PenLine size={16} /> New Post
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:border-orange-300 hover:text-orange-200">
+              <Home size={15} /> Home
+            </Link>
+            <Link href="/dashboard" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:border-orange-300 hover:text-orange-200">
+              <LayoutDashboard size={15} /> Dashboard
+            </Link>
+            <Link href="/blog/create" className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-500/25 transition hover:bg-orange-400">
+              <PenLine size={16} /> New Post
+            </Link>
+          </div>
         </header>
 
         {loading ? (

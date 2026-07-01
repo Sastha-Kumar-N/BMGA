@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, ClipboardCheck, Trash2, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ClipboardCheck, XCircle } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 
-type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+type ReviewStatus = 'PENDING' | 'UNDER_REVIEW' | 'NEEDS_CHANGES' | 'APPROVED' | 'REJECTED' | 'ARCHIVED';
 
 type OrganismUpload = {
   id: string;
@@ -89,7 +89,8 @@ export default function AdminUploadsPage() {
       const response = await fetch(apiPath('/admin/organism-uploads'), { headers, cache: 'no-store' });
       const data = response.ok ? await response.json() as OrganismUpload[] : [];
       setUploads(data);
-      const first = data.find((item) => item.status === 'PENDING') || data[0];
+      const preferredId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('selected') : '';
+      const first = data.find((item) => item.id === preferredId) || data.find((item) => item.status === 'PENDING') || data[0];
       if (first) selectUpload(first);
       setMessage({ type: 'idle', text: '' });
     } catch (error) {
@@ -123,14 +124,14 @@ export default function AdminUploadsPage() {
     }
   };
 
-  const runAction = async (action: 'approve' | 'reject' | 'delete') => {
+  const runAction = async (action: 'approve' | 'reject') => {
     if (!selected) return;
-    setMessage({ type: 'loading', text: `${action === 'delete' ? 'Deleting' : action === 'approve' ? 'Approving' : 'Rejecting'} submission...` });
+    setMessage({ type: 'loading', text: `${action === 'approve' ? 'Approving' : 'Rejecting'} submission...` });
     try {
-      const response = await fetch(apiPath(`/admin/organism-uploads/${selected.id}${action === 'delete' ? '' : `/${action}`}`), {
-        method: action === 'delete' ? 'DELETE' : 'POST',
+      const response = await fetch(apiPath(`/admin/organism-uploads/${selected.id}/${action}`), {
+        method: 'POST',
         headers,
-        body: action === 'delete' ? undefined : JSON.stringify({ reviewNote }),
+        body: JSON.stringify({ reviewNote }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Failed to ${action} submission`);
@@ -167,8 +168,11 @@ export default function AdminUploadsPage() {
               <select value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)} className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-bold outline-none focus:border-orange-500">
                 <option value="ALL">All uploads</option>
                 <option value="PENDING">Pending</option>
+                <option value="UNDER_REVIEW">Under review</option>
+                <option value="NEEDS_CHANGES">Needs changes</option>
                 <option value="APPROVED">Approved</option>
                 <option value="REJECTED">Rejected</option>
+                <option value="ARCHIVED">Archived</option>
               </select>
             </div>
             <div className="max-h-[720px] divide-y divide-slate-100 overflow-y-auto">
@@ -193,7 +197,12 @@ export default function AdminUploadsPage() {
                     <h2 className="text-2xl font-black tracking-tight">Edit Before Approval</h2>
                     <p className="mt-1 text-sm font-bold text-slate-500">Submitted {new Date(selected.createdAt).toLocaleString()}</p>
                   </div>
-                  <StatusBadge status={selected.status} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={selected.status} />
+                    <Link href={`/admin/submissions/${selected.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-[#0B1B3A] hover:border-orange-300 hover:text-orange-600">
+                      Detail Page
+                    </Link>
+                  </div>
                 </div>
 
                 <div className="grid gap-5 md:grid-cols-2">
@@ -213,7 +222,7 @@ export default function AdminUploadsPage() {
                 <Area label="Metadata JSON" value={form.metadata} onChange={(value) => setForm({ ...form, metadata: value })} rows={6} />
                 <Area label="Review Note" value={reviewNote} onChange={setReviewNote} rows={3} />
 
-                <div className="grid gap-3 md:grid-cols-4">
+                <div className="grid gap-3 md:grid-cols-3">
                   <button onClick={saveEdits} disabled={message.type === 'loading' || selected.status === 'APPROVED'} className="rounded-xl bg-[#0B1B3A] px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-orange-500 disabled:opacity-50">
                     Save Edits
                   </button>
@@ -222,9 +231,6 @@ export default function AdminUploadsPage() {
                   </button>
                   <button onClick={() => runAction('reject')} disabled={message.type === 'loading'} className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-red-700 disabled:opacity-50">
                     <XCircle size={15} /> Reject
-                  </button>
-                  <button onClick={() => runAction('delete')} disabled={message.type === 'loading'} className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-black uppercase tracking-widest text-red-700 hover:bg-red-100 disabled:opacity-50">
-                    <Trash2 size={15} /> Delete
                   </button>
                 </div>
               </div>
@@ -241,8 +247,11 @@ export default function AdminUploadsPage() {
 function StatusBadge({ status }: { status: ReviewStatus }) {
   const classes = {
     PENDING: 'border-amber-200 bg-amber-50 text-amber-700',
+    UNDER_REVIEW: 'border-blue-200 bg-blue-50 text-blue-700',
+    NEEDS_CHANGES: 'border-orange-200 bg-orange-50 text-orange-700',
     APPROVED: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     REJECTED: 'border-red-200 bg-red-50 text-red-700',
+    ARCHIVED: 'border-red-200 bg-red-50 text-red-700',
   };
   return <span className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-widest ${classes[status]}`}>{status}</span>;
 }

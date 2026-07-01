@@ -12,6 +12,7 @@ export default function OrganismResultsPage({ organismId }: { organismId: string
   const [results, setResults] = useState<OrganismResultsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<"summary" | "tools">("summary");
 
   useEffect(() => {
     let active = true;
@@ -39,6 +40,51 @@ export default function OrganismResultsPage({ organismId }: { organismId: string
     };
   }, [organismId]);
 
+  useEffect(() => {
+    if (loading || !results) return;
+    const targetId = window.location.hash.replace("#", "");
+    if (!targetId) return;
+
+    window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({ block: "start" });
+      setActiveSection(targetId === "tool-results" ? "tools" : "summary");
+    });
+  }, [loading, results]);
+
+  const scrollToSection = (sectionId: string) => {
+    const target = document.getElementById(sectionId);
+    if (!target) return;
+    setActiveSection(sectionId === "tool-results" ? "tools" : "summary");
+    window.history.replaceState(null, "", `#${sectionId}`);
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  useEffect(() => {
+    if (loading || !results) return;
+    const summary = document.getElementById("genome-summary");
+    const tools = document.getElementById("tool-results");
+    if (!summary || !tools) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+
+        if (visible?.target.id === "tool-results") {
+          setActiveSection("tools");
+        } else if (visible?.target.id === "genome-summary") {
+          setActiveSection("summary");
+        }
+      },
+      { rootMargin: "-120px 0px -55% 0px", threshold: [0.1, 0.35, 0.65] },
+    );
+
+    observer.observe(summary);
+    observer.observe(tools);
+    return () => observer.disconnect();
+  }, [loading, results]);
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
@@ -64,13 +110,13 @@ export default function OrganismResultsPage({ organismId }: { organismId: string
               <LayoutDashboard size={14} />
               Dashboard
             </Link>
-            <a href="#genome-summary" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm transition hover:border-orange-300 hover:text-orange-600">
+            <button type="button" onClick={() => scrollToSection("genome-summary")} className={sectionNavClass(activeSection === "summary")}>
               <BarChart3 size={14} />
               Summary
-            </a>
-            <a href="#tool-results" className="inline-flex items-center gap-2 rounded-xl bg-[#0B1B3A] px-3 py-2 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-orange-500">
+            </button>
+            <button type="button" onClick={() => scrollToSection("tool-results")} className={sectionNavClass(activeSection === "tools")}>
               Tool Results
-            </a>
+            </button>
           </div>
         </div>
       </nav>
@@ -105,4 +151,10 @@ export default function OrganismResultsPage({ organismId }: { organismId: string
       </div>
     </main>
   );
+}
+
+function sectionNavClass(active: boolean) {
+  return active
+    ? "inline-flex items-center gap-2 rounded-xl bg-[#0B1B3A] px-3 py-2 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-orange-500"
+    : "inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm transition hover:border-orange-300 hover:text-orange-600";
 }

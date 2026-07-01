@@ -11,6 +11,7 @@ import {
   Database,
   Dna,
   FilePlus2,
+  Home,
   LayoutDashboard,
   LogOut,
   ShieldCheck,
@@ -19,7 +20,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../lib/api-client';
 
-type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+type ReviewStatus = 'PENDING' | 'UNDER_REVIEW' | 'NEEDS_CHANGES' | 'APPROVED' | 'REJECTED' | 'ARCHIVED';
 
 type UserUpload = {
   id: string;
@@ -128,6 +129,7 @@ export default function AccountPage() {
             subtitle: upload.strainName,
             status: upload.status,
             note: upload.reviewNote,
+            href: `/submissions/${upload.id}`,
           }))}
         />
         <ReviewPanel
@@ -151,9 +153,19 @@ function AccountShell({ children }: { children: React.ReactNode }) {
   return (
     <main className="min-h-screen bg-[#f6f8fb] px-5 py-8 text-[#0B1B3A] md:px-8">
       <div className="mx-auto max-w-7xl space-y-7">
-        <Link href="/" className="inline-flex items-center gap-3 text-sm font-black uppercase tracking-widest text-orange-600">
-          <Dna size={22} /> BMGA
-        </Link>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Link href="/" className="inline-flex items-center gap-3 text-sm font-black uppercase tracking-widest text-orange-600">
+            <Dna size={22} /> BMGA
+          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#0B1B3A] shadow-sm transition hover:border-orange-300 hover:text-orange-600">
+              <Home size={15} /> Home
+            </Link>
+            <Link href="/dashboard" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0B1B3A] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-orange-500">
+              <LayoutDashboard size={15} /> Dashboard
+            </Link>
+          </div>
+        </div>
         {children}
       </div>
     </main>
@@ -179,7 +191,7 @@ function ReviewPanel({ title, empty, loading, rows }: {
   title: string;
   empty: string;
   loading: boolean;
-  rows: Array<{ id: string; title: string; subtitle: string; status: ReviewStatus; note?: string | null }>;
+  rows: Array<{ id: string; title: string; subtitle: string; status: ReviewStatus; note?: string | null; href?: string }>;
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -189,16 +201,28 @@ function ReviewPanel({ title, empty, loading, rows }: {
       <div className="divide-y divide-slate-100">
         {loading ? (
           <p className="px-5 py-12 text-center text-xs font-black uppercase tracking-widest text-slate-400">Loading review queue</p>
-        ) : rows.length ? rows.map((row) => (
-          <div key={row.id} className="grid gap-4 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+        ) : rows.length ? rows.map((row) => {
+          const content = (
+            <>
             <div className="min-w-0">
               <p className="truncate text-sm font-black">{row.title}</p>
               <p className="mt-1 truncate text-xs font-bold text-slate-500">{row.subtitle}</p>
               {row.note && <p className="mt-2 text-xs font-semibold text-slate-500">{row.note}</p>}
             </div>
             <StatusBadge status={row.status} />
-          </div>
-        )) : (
+            </>
+          );
+
+          return row.href ? (
+            <Link key={row.id} href={row.href} className="grid gap-4 px-5 py-4 transition hover:bg-orange-50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              {content}
+            </Link>
+          ) : (
+            <div key={row.id} className="grid gap-4 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              {content}
+            </div>
+          );
+        }) : (
           <p className="px-5 py-12 text-center text-sm font-bold text-slate-500">{empty}</p>
         )}
       </div>
@@ -209,8 +233,11 @@ function ReviewPanel({ title, empty, loading, rows }: {
 function StatusBadge({ status }: { status: ReviewStatus }) {
   const styles = {
     PENDING: 'bg-amber-50 text-amber-700 border-amber-200',
+    UNDER_REVIEW: 'bg-blue-50 text-blue-700 border-blue-200',
+    NEEDS_CHANGES: 'bg-orange-50 text-orange-700 border-orange-200',
     APPROVED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     REJECTED: 'bg-red-50 text-red-700 border-red-200',
+    ARCHIVED: 'bg-red-50 text-red-700 border-red-200',
   };
   const Icon = status === 'APPROVED' ? CheckCircle2 : status === 'REJECTED' ? XCircle : Clock3;
 

@@ -254,71 +254,75 @@ export default function ToolResultsTabs({ tools, toolOrder }: { tools: Record<st
   const issuePanel = activeComputed.issueCount > 0 ? <ToolIssuePanel tool={activeTool} /> : null;
 
   return (
-    <section className="grid gap-6 lg:grid-cols-[310px_minmax(0,1fr)]">
-      <aside className="h-fit overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm lg:sticky lg:top-28">
-        <div className="relative overflow-hidden border-b border-slate-100 bg-[#0B1B3A] px-5 py-5 text-white">
-          <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-orange-400/20" />
-          <div className="absolute -bottom-10 left-8 h-24 w-24 rounded-full bg-white/5" />
-          <div className="relative">
-            <p className="text-sm font-black">Pipeline Tools</p>
-            <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-orange-200">
-              {toolStats.withData} WITH DATA
-            </p>
+    <section className="grid gap-6 lg:grid-cols-[330px_minmax(0,1fr)]">
+      <aside className="h-fit space-y-4 lg:sticky lg:top-28">
+        <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div className="relative overflow-hidden border-b border-slate-100 bg-[#0B1B3A] px-5 py-5 text-white">
+            <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-orange-400/20" />
+            <div className="absolute -bottom-10 left-8 h-24 w-24 rounded-full bg-white/5" />
+            <div className="relative">
+              <p className="text-sm font-black">Pipeline Tools</p>
+              <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-orange-200">
+                {toolStats.withData} WITH DATA
+              </p>
+            </div>
+          </div>
+
+          <div className="max-h-[min(560px,calc(100vh-420px))] space-y-1 overflow-y-auto p-3">
+            {orderedTools.map((tool) => {
+              const computed = toolStats.computedByTool.get(tool.toolName) || getToolComputed(tool);
+              const isActive = tool.toolName === activeTool.toolName;
+              const styles = categoryStyle(tool.category);
+
+              return (
+                <button
+                  key={tool.toolName}
+                  onClick={() => setActiveToolKey(tool.toolName)}
+                  className={`group w-full rounded-2xl px-3 py-3 text-left transition ${
+                    isActive
+                      ? "bg-[#0B1B3A] text-white shadow-lg shadow-slate-300/60 ring-1 ring-[#0B1B3A]"
+                      : computed.hasData
+                        ? "text-slate-700 hover:bg-slate-50 hover:ring-1 hover:ring-slate-200"
+                        : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${computed.hasData ? styles.dot : "bg-slate-300"}`} />
+                        <span className="truncate text-sm font-black">{tool.displayName}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${
+                            isActive ? "border-white/15 bg-white/10 text-orange-100" : styles.label
+                          }`}
+                        >
+                          {tool.category}
+                        </span>
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isActive ? "text-slate-300" : computed.hasData ? "text-emerald-600" : "text-slate-400"}`}>
+                          {computed.hasData ? "With data" : "No data"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {computed.countBadge > 0 && (
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-1 font-mono text-[10px] font-black ${
+                          isActive ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {displayCount(computed.countBadge)}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="max-h-[min(760px,calc(100vh-220px))] space-y-1 overflow-y-auto p-3">
-          {orderedTools.map((tool) => {
-            const computed = toolStats.computedByTool.get(tool.toolName) || getToolComputed(tool);
-            const isActive = tool.toolName === activeTool.toolName;
-            const styles = categoryStyle(tool.category);
-
-            return (
-              <button
-                key={tool.toolName}
-                onClick={() => setActiveToolKey(tool.toolName)}
-                className={`group w-full rounded-2xl px-3 py-3 text-left transition ${
-                  isActive
-                    ? "bg-[#0B1B3A] text-white shadow-lg shadow-slate-300/60 ring-1 ring-[#0B1B3A]"
-                    : computed.hasData
-                      ? "text-slate-700 hover:bg-slate-50 hover:ring-1 hover:ring-slate-200"
-                      : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${computed.hasData ? styles.dot : "bg-slate-300"}`} />
-                      <span className="truncate text-sm font-black">{tool.displayName}</span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${
-                          isActive ? "border-white/15 bg-white/10 text-orange-100" : styles.label
-                        }`}
-                      >
-                        {tool.category}
-                      </span>
-                      <span className={`text-[9px] font-black uppercase tracking-widest ${isActive ? "text-slate-300" : computed.hasData ? "text-emerald-600" : "text-slate-400"}`}>
-                        {computed.hasData ? "With data" : "No data"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {computed.countBadge > 0 && (
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-1 font-mono text-[10px] font-black ${
-                        isActive ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-700"
-                      }`}
-                    >
-                      {displayCount(computed.countBadge)}
-                    </span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        <CategoryDistributionPanel categoryDistribution={categoryDistribution} />
       </aside>
 
       <div className="min-w-0 space-y-6">
@@ -350,40 +354,6 @@ export default function ToolResultsTabs({ tools, toolOrder }: { tools: Record<st
             </div>
             <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Last import/status</p>
             <p className="mt-1 truncate font-mono text-sm font-black text-[#0B1B3A]">{formatDate(toolStats.latestImport)}</p>
-          </div>
-        </div>
-
-        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-sm font-black text-[#0B1B3A]">Category distribution</p>
-              <p className="text-xs font-semibold text-slate-500">Availability is computed from actual summaries, result rows, or raw output files.</p>
-            </div>
-            <span className="inline-flex w-fit items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
-              <Circle size={8} fill="currentColor" />
-              Dynamic
-            </span>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {categoryDistribution.map(([category, counts]) => {
-              const styles = categoryStyle(category);
-              const width = counts.total ? Math.round((counts.withData / counts.total) * 100) : 0;
-
-              return (
-                <div key={category} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <span className={`text-xs font-black ${styles.text}`}>{category}</span>
-                    <span className="font-mono text-[11px] font-black text-slate-500">
-                      {counts.withData}/{counts.total}
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-white">
-                    <div className={`h-full rounded-full ${styles.dot}`} style={{ width: `${width}%` }} />
-                  </div>
-                </div>
-              );
-            })}
           </div>
         </div>
 
@@ -485,6 +455,44 @@ export default function ToolResultsTabs({ tools, toolOrder }: { tools: Record<st
         )}
       </div>
     </section>
+  );
+}
+
+function CategoryDistributionPanel({ categoryDistribution }: { categoryDistribution: Array<[string, { total: number; withData: number }]> }) {
+  return (
+    <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-black text-[#0B1B3A]">Category distribution</p>
+          <p className="mt-1 text-[11px] font-semibold leading-5 text-slate-500">Computed from actual summaries, rows, and files.</p>
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-slate-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-slate-500">
+          <Circle size={7} fill="currentColor" />
+          Dynamic
+        </span>
+      </div>
+
+      <div className="max-h-[340px] space-y-2 overflow-y-auto pr-1">
+        {categoryDistribution.map(([category, counts]) => {
+          const styles = categoryStyle(category);
+          const width = counts.total ? Math.round((counts.withData / counts.total) * 100) : 0;
+
+          return (
+            <div key={category} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className={`truncate text-xs font-black ${styles.text}`}>{category}</span>
+                <span className="shrink-0 font-mono text-[11px] font-black text-slate-500">
+                  {counts.withData}/{counts.total}
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-white">
+                <div className={`h-full rounded-full ${styles.dot}`} style={{ width: `${width}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

@@ -473,6 +473,13 @@ function normalizedEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+function destructiveConfirmationMatches(value: unknown, expected: string) {
+  if (typeof value !== "string") return false;
+  const raw = value.trim();
+  const target = expected.trim();
+  return raw.toUpperCase() === "DELETE" || raw === target || raw.toLowerCase() === target.toLowerCase();
+}
+
 function parseOptionalInt(value: unknown) {
   if (value === undefined || value === null || value === "") return undefined;
   const parsed = Number(value);
@@ -693,6 +700,214 @@ async function writeAdminLog(adminId: string | undefined, action: string, target
   }
 }
 
+const ADMIN_LOG_ACTOR_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+} satisfies Prisma.UserSelect;
+
+const SUBMISSION_PERSON_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  affiliation: true,
+} satisfies Prisma.UserSelect;
+
+function boundedAuditLimit(value: unknown, fallback = 100) {
+  const parsed = parseOptionalInt(Array.isArray(value) ? value[0] : value);
+  if (!parsed) return fallback;
+  return Math.min(Math.max(parsed, 1), 250);
+}
+
+function buildAuditLogWhere(query: Request["query"]) {
+  const targetType = textValue(query.targetType, 80);
+  const targetId = textValue(query.targetId, 160);
+  const action = textValue(query.action, 120);
+  const adminId = textValue(query.adminId, 160);
+  const search = textValue(query.search, 200);
+
+  const where: Prisma.AdminLogWhereInput = {};
+  if (targetType) where.targetType = targetType;
+  if (targetId) where.targetId = targetId;
+  if (action) where.action = action;
+  if (adminId) where.adminId = adminId;
+  if (search) {
+    where.OR = [
+      { action: { contains: search, mode: "insensitive" } },
+      { targetType: { contains: search, mode: "insensitive" } },
+      { targetId: { contains: search, mode: "insensitive" } },
+      { admin: { name: { contains: search, mode: "insensitive" } } },
+      { admin: { email: { contains: search, mode: "insensitive" } } },
+    ];
+  }
+
+  return where;
+}
+
+function targetAuditLogs(targetType: string, targetId: string, take = 50) {
+  return prisma.adminLog.findMany({
+    where: { targetType, targetId },
+    orderBy: { createdAt: "desc" },
+    take,
+    include: {
+      admin: { select: ADMIN_LOG_ACTOR_SELECT },
+    },
+  });
+}
+
+function submissionDetailInclude(includeInternalNotes: boolean) {
+  return {
+    submittedBy: { select: SUBMISSION_PERSON_SELECT },
+    reviewedBy: { select: ADMIN_LOG_ACTOR_SELECT },
+    statusHistory: {
+      ...(includeInternalNotes ? {} : { where: { visibleToSubmitter: true } }),
+      orderBy: { createdAt: "asc" as const },
+      include: {
+        actor: { select: SUBMISSION_PERSON_SELECT },
+      },
+    },
+    reviewerNotes: {
+      ...(includeInternalNotes ? {} : { where: { visibleToSubmitter: true } }),
+      orderBy: { createdAt: "asc" as const },
+      include: {
+        author: { select: SUBMISSION_PERSON_SELECT },
+      },
+    },
+  };
+}
+
+function reviewNoteValue(value: unknown) {
+  return sanitizeContactText(value, 4000, true);
+}
+
+async function recordSubmissionStatusHistory(options: {
+  submissionId: string;
+  status: string;
+  actorId?: string;
+  note?: string;
+  visibleToSubmitter?: boolean;
+  createdAt?: Date;
+}) {
+  return prisma.submissionStatusHistory.create({
+    data: {
+      submissionId: options.submissionId,
+      status: options.status,
+      actorId: options.actorId,
+      note: options.note,
+      visibleToSubmitter: options.visibleToSubmitter ?? true,
+      createdAt: options.createdAt,
+    },
+  });
+}
+
+async function addSubmissionReviewerNote(options: {
+  submissionId: string;
+  authorId?: string;
+  message: string;
+  visibleToSubmitter?: boolean;
+}) {
+  return prisma.submissionReviewerNote.create({
+    data: {
+      submissionId: options.submissionId,
+      authorId: options.authorId,
+      message: options.message,
+      visibleToSubmitter: options.visibleToSubmitter ?? true,
+    },
+    include: {
+      author: { select: SUBMISSION_PERSON_SELECT },
+    },
+  });
+}
+
+async function ensureSubmissionStatusHistory(upload: {
+  id: string;
+  submittedById: string;
+  reviewedById: string | null;
+  status: ApprovalStatus;
+  reviewNote: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  reviewedAt: Date | null;
+}) {
+  const existingCount = await prisma.submissionStatusHistory.count({ where: { submissionId: upload.id } });
+  if (existingCount > 0) return;
+
+  await recordSubmissionStatusHistory({
+    submissionId: upload.id,
+    status: "SUBMITTED",
+    actorId: upload.submittedById,
+    note: "Initial submission received.",
+    visibleToSubmitter: true,
+    createdAt: upload.createdAt,
+  });
+
+  if (upload.status !== ApprovalStatus.PENDING) {
+    await recordSubmissionStatusHistory({
+      submissionId: upload.id,
+      status: upload.status,
+      actorId: upload.reviewedById || undefined,
+      note: upload.reviewNote || "Current review status backfilled.",
+      visibleToSubmitter: true,
+      createdAt: upload.reviewedAt || upload.updatedAt,
+    });
+  }
+}
+
+function metadataString(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return undefined;
+}
+
+function metadataNumber(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function sanitizeSubmissionFiles(metadata: Prisma.JsonValue | null | undefined) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
+  const source = metadata as Record<string, unknown>;
+  const files = Array.isArray(source.files)
+    ? source.files
+    : Array.isArray(source.uploadedFiles)
+      ? source.uploadedFiles
+      : [];
+
+  return files
+    .filter((file): file is Record<string, unknown> => !!file && typeof file === "object" && !Array.isArray(file))
+    .slice(0, 50)
+    .map((file, index) => ({
+      id: metadataString(file, ["id", "fileId"]) || `metadata-file-${index + 1}`,
+      fileName: metadataString(file, ["fileName", "name", "originalName"]) || "Unnamed file",
+      fileType: metadataString(file, ["fileType", "type", "mimeType", "contentType"]) || "N/A",
+      fileSizeBytes: metadataNumber(file, ["fileSizeBytes", "size", "bytes"]),
+      uploadedAt: metadataString(file, ["uploadedAt", "createdAt", "timestamp"]),
+      processingStatus: metadataString(file, ["processingStatus", "status"]) || "N/A",
+      checksum: metadataString(file, ["checksum", "checksumSha256", "sha256"]),
+    }));
+}
+
+function buildSubmissionResponse<T extends { metadata: Prisma.JsonValue | null; scientificName: string; strainName: string }>(upload: T) {
+  return {
+    ...upload,
+    submissionType: "Organism Upload",
+    title: `${upload.scientificName} / ${upload.strainName}`,
+    files: sanitizeSubmissionFiles(upload.metadata),
+  };
+}
+
 function validateImportFile(fileName: unknown, fileContent: unknown) {
   const normalizedFileName = textValue(fileName, 240) || "results.tsv";
   const extension = path.extname(normalizedFileName).toLowerCase();
@@ -906,6 +1121,55 @@ app.get('/api/me/uploads', requireAuth, async (req: AuthenticatedRequest, res: R
   }
 });
 
+app.get('/api/submissions/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const submissionId = parseStringParam(req.params.id);
+    const existing = await prisma.organismUpload.findUnique({
+      where: { id: submissionId },
+      select: {
+        id: true,
+        submittedById: true,
+        reviewedById: true,
+        status: true,
+        reviewNote: true,
+        createdAt: true,
+        updatedAt: true,
+        reviewedAt: true,
+      },
+    });
+
+    if (!existing) return res.status(404).json({ error: "Submission not found" });
+
+    const isOwner = existing.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) {
+      await writeAdminLog(req.user?.userId, "SUBMISSION_DETAIL_UNAUTHORIZED", "OrganismUpload", submissionId, {
+        result: "failure",
+        statusCode: 403,
+      });
+      return res.status(403).json({ error: "You are not allowed to view this submission" });
+    }
+
+    await ensureSubmissionStatusHistory(existing);
+    const upload = await prisma.organismUpload.findUnique({
+      where: { id: submissionId },
+      include: submissionDetailInclude(isAdmin),
+    });
+
+    if (!upload) return res.status(404).json({ error: "Submission not found" });
+
+    await writeAdminLog(req.user?.userId, isAdmin ? "ADMIN_SUBMISSION_DETAIL_VIEWED" : "USER_SUBMISSION_DETAIL_VIEWED", "OrganismUpload", submissionId, {
+      status: upload.status,
+      result: "success",
+    });
+
+    res.json({ submission: buildSubmissionResponse(upload) });
+  } catch (error) {
+    console.error("Submission Detail Error:", error);
+    res.status(500).json({ error: "Failed to fetch submission detail" });
+  }
+});
+
 app.post('/api/organism-uploads', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const payload = buildOrganismUploadData(req.body || {});
@@ -922,6 +1186,22 @@ app.post('/api/organism-uploads', requireAuth, async (req: AuthenticatedRequest,
       include: {
         submittedBy: { select: { id: true, name: true, email: true, role: true, affiliation: true } },
       },
+    });
+
+    await recordSubmissionStatusHistory({
+      submissionId: upload.id,
+      status: "SUBMITTED",
+      actorId: req.user?.userId,
+      note: "Initial submission received.",
+      visibleToSubmitter: true,
+      createdAt: upload.createdAt,
+    });
+
+    await writeAdminLog(req.user?.userId, "ORGANISM_UPLOAD_SUBMITTED", "OrganismUpload", upload.id, {
+      scientificName: upload.scientificName,
+      strainName: upload.strainName,
+      submitterEmail: upload.submittedBy.email,
+      submitterRole: upload.submittedBy.role,
     });
 
     res.status(201).json({ message: "Organism upload submitted for admin verification", upload });
@@ -986,6 +1266,12 @@ app.post('/api/blog-posts', requireRole([UserRole.CONTRIBUTOR, UserRole.MODERATO
       include: {
         author: { select: { id: true, name: true, email: true, role: true, affiliation: true } },
       },
+    });
+
+    await writeAdminLog(req.user?.userId, "BLOG_POST_SUBMITTED", "BlogPost", post.id, {
+      title: post.title,
+      authorEmail: post.author.email,
+      authorRole: post.author.role,
     });
 
     res.status(201).json({ message: "Blog post submitted for admin review", post });
@@ -1117,6 +1403,30 @@ app.use('/api/admin', adminRateLimiter);
 
 app.get('/api/admin/me', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   res.json({ ok: true, user: req.user });
+});
+
+app.get('/api/admin/audit-logs', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const limit = boundedAuditLimit(req.query.limit);
+    const where = buildAuditLogWhere(req.query);
+
+    const [logs, total] = await prisma.$transaction([
+      prisma.adminLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        include: {
+          admin: { select: ADMIN_LOG_ACTOR_SELECT },
+        },
+      }),
+      prisma.adminLog.count({ where }),
+    ]);
+
+    res.json({ logs, total, limit });
+  } catch (error) {
+    console.error("Admin Audit Log Fetch Error:", error);
+    res.status(500).json({ error: "Failed to fetch audit logs" });
+  }
 });
 
 app.get('/api/admin/contact-messages', requireAdmin, async (req: Request, res: Response) => {
@@ -1377,6 +1687,96 @@ app.post('/api/admin/users/:id/password-reset', requireAdmin, async (req: Authen
   }
 });
 
+app.delete('/api/admin/users/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const targetUserId = parseStringParam(req.params.id);
+  try {
+    if (!targetUserId) {
+      await writeAdminLog(req.user?.userId, "USER_DELETE_ATTEMPT", "User", undefined, {
+        result: "failure",
+        reason: "invalid_user_id",
+        statusCode: 400,
+      });
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        _count: {
+          select: {
+            organismUploads: true,
+            blogPosts: true,
+          },
+        },
+      },
+    });
+
+    if (!targetUser) {
+      await writeAdminLog(req.user?.userId, "USER_DELETE_ATTEMPT", "User", targetUserId, {
+        result: "failure",
+        reason: "not_found",
+        statusCode: 404,
+      });
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (targetUser.id === req.user?.userId) {
+      await writeAdminLog(req.user?.userId, "USER_DELETE_ATTEMPT", "User", targetUserId, {
+        result: "failure",
+        reason: "self_delete_blocked",
+        targetEmail: targetUser.email,
+        statusCode: 409,
+      });
+      return res.status(409).json({ error: "Admins cannot delete their own active account" });
+    }
+
+    if (targetUser.role === UserRole.ADMIN) {
+      const adminCount = await prisma.user.count({ where: { role: UserRole.ADMIN } });
+      if (adminCount <= 1) {
+        await writeAdminLog(req.user?.userId, "USER_DELETE_ATTEMPT", "User", targetUserId, {
+          result: "failure",
+          reason: "last_admin_blocked",
+          targetEmail: targetUser.email,
+          statusCode: 409,
+        });
+        return res.status(409).json({ error: "Cannot delete the last admin account" });
+      }
+    }
+
+    if (!destructiveConfirmationMatches(req.body?.confirmEmail, targetUser.email)) {
+      await writeAdminLog(req.user?.userId, "USER_DELETE_ATTEMPT", "User", targetUserId, {
+        result: "failure",
+        reason: "confirmation_mismatch",
+        targetEmail: targetUser.email,
+        statusCode: 400,
+      });
+      return res.status(400).json({ error: "Type the user's email address or DELETE to confirm deletion" });
+    }
+
+    await prisma.user.delete({ where: { id: targetUserId } });
+    await writeAdminLog(req.user?.userId, "USER_DELETED", "User", targetUserId, {
+      targetEmail: targetUser.email,
+      targetRole: targetUser.role,
+      organismUploads: targetUser._count.organismUploads,
+      blogPosts: targetUser._count.blogPosts,
+    });
+
+    res.json({ message: "User deleted", deletedUserId: targetUserId });
+  } catch (error) {
+    console.error("Admin User Delete Error:", error);
+    await writeAdminLog(req.user?.userId, "USER_DELETE_ATTEMPT", "User", targetUserId || undefined, {
+      result: "failure",
+      reason: "server_error",
+      statusCode: 500,
+    });
+    res.status(500).json({ error: "Failed to delete user" });
+  }
+});
+
 app.get('/api/admin/organism-uploads', requireAdmin, async (req: Request, res: Response) => {
   try {
     const status = String(req.query.status || "").toUpperCase();
@@ -1396,6 +1796,188 @@ app.get('/api/admin/organism-uploads', requireAdmin, async (req: Request, res: R
   }
 });
 
+app.get('/api/admin/organism-uploads/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const uploadId = parseStringParam(req.params.id);
+    const existing = await prisma.organismUpload.findUnique({
+      where: { id: uploadId },
+      select: {
+        id: true,
+        submittedById: true,
+        reviewedById: true,
+        status: true,
+        reviewNote: true,
+        createdAt: true,
+        updatedAt: true,
+        reviewedAt: true,
+      },
+    });
+
+    if (!existing) return res.status(404).json({ error: "Organism upload not found" });
+    await ensureSubmissionStatusHistory(existing);
+
+    const upload = await prisma.organismUpload.findUnique({
+      where: { id: uploadId },
+      include: submissionDetailInclude(true),
+    });
+    if (!upload) return res.status(404).json({ error: "Organism upload not found" });
+
+    await writeAdminLog(req.user?.userId, "ORGANISM_UPLOAD_DETAIL_VIEWED", "OrganismUpload", uploadId, {
+      status: upload.status,
+      scientificName: upload.scientificName,
+      strainName: upload.strainName,
+    });
+
+    const auditLogs = await targetAuditLogs("OrganismUpload", uploadId);
+    const submission = buildSubmissionResponse(upload);
+    res.json({ upload: submission, submission, auditLogs });
+  } catch (error) {
+    console.error("Admin Upload Detail Error:", error);
+    res.status(500).json({ error: "Failed to fetch organism upload detail" });
+  }
+});
+
+app.get('/api/admin/submissions/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const submissionId = parseStringParam(req.params.id);
+    const existing = await prisma.organismUpload.findUnique({
+      where: { id: submissionId },
+      select: {
+        id: true,
+        submittedById: true,
+        reviewedById: true,
+        status: true,
+        reviewNote: true,
+        createdAt: true,
+        updatedAt: true,
+        reviewedAt: true,
+      },
+    });
+
+    if (!existing) return res.status(404).json({ error: "Submission not found" });
+    await ensureSubmissionStatusHistory(existing);
+
+    const upload = await prisma.organismUpload.findUnique({
+      where: { id: submissionId },
+      include: submissionDetailInclude(true),
+    });
+    if (!upload) return res.status(404).json({ error: "Submission not found" });
+
+    await writeAdminLog(req.user?.userId, "ADMIN_SUBMISSION_DETAIL_VIEWED", "OrganismUpload", submissionId, {
+      status: upload.status,
+      result: "success",
+    });
+
+    const auditLogs = await targetAuditLogs("OrganismUpload", submissionId);
+    res.json({ submission: buildSubmissionResponse(upload), auditLogs });
+  } catch (error) {
+    console.error("Admin Submission Detail Error:", error);
+    res.status(500).json({ error: "Failed to fetch submission detail" });
+  }
+});
+
+app.post('/api/admin/submissions/:id/notes', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const submissionId = parseStringParam(req.params.id);
+    const message = reviewNoteValue(req.body.message);
+    const visibleToSubmitter = req.body.visibleToSubmitter !== false;
+
+    if (!message) {
+      return res.status(400).json({ error: "Reviewer note is required" });
+    }
+
+    const upload = await prisma.organismUpload.findUnique({ where: { id: submissionId }, select: { id: true } });
+    if (!upload) return res.status(404).json({ error: "Submission not found" });
+
+    const note = await addSubmissionReviewerNote({
+      submissionId,
+      authorId: req.user?.userId,
+      message,
+      visibleToSubmitter,
+    });
+
+    if (visibleToSubmitter) {
+      await prisma.organismUpload.update({
+        where: { id: submissionId },
+        data: { reviewNote: message },
+      });
+    }
+
+    await writeAdminLog(req.user?.userId, "SUBMISSION_REVIEWER_NOTE_ADDED", "OrganismUpload", submissionId, {
+      visibleToSubmitter,
+    });
+
+    res.status(201).json({ message: "Reviewer note added", note });
+  } catch (error) {
+    console.error("Submission Reviewer Note Error:", error);
+    res.status(500).json({ error: "Failed to add reviewer note" });
+  }
+});
+
+app.post('/api/admin/submissions/:id/status', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const submissionId = parseStringParam(req.params.id);
+    const requestedStatus = String(req.body.status || "").trim().toUpperCase() as ApprovalStatus;
+    const allowedStatuses = new Set<ApprovalStatus>([
+      ApprovalStatus.UNDER_REVIEW,
+      ApprovalStatus.NEEDS_CHANGES,
+      ApprovalStatus.REJECTED,
+      ApprovalStatus.ARCHIVED,
+    ]);
+    const note = reviewNoteValue(req.body.note ?? req.body.reviewNote);
+    const visibleToSubmitter = req.body.visibleToSubmitter !== false;
+
+    if (!Object.values(ApprovalStatus).includes(requestedStatus) || !allowedStatuses.has(requestedStatus)) {
+      return res.status(400).json({ error: "Unsupported submission status update" });
+    }
+    if ((requestedStatus === ApprovalStatus.REJECTED || requestedStatus === ApprovalStatus.NEEDS_CHANGES) && !note) {
+      return res.status(400).json({ error: "A reviewer note is required for rejection or requested changes" });
+    }
+
+    const existing = await prisma.organismUpload.findUnique({ where: { id: submissionId } });
+    if (!existing) return res.status(404).json({ error: "Submission not found" });
+
+    const upload = await prisma.organismUpload.update({
+      where: { id: submissionId },
+      data: {
+        status: requestedStatus,
+        reviewedById: req.user?.userId,
+        reviewedAt: new Date(),
+        reviewNote: note || undefined,
+      },
+      include: submissionDetailInclude(true),
+    });
+
+    await recordSubmissionStatusHistory({
+      submissionId,
+      status: requestedStatus,
+      actorId: req.user?.userId,
+      note,
+      visibleToSubmitter,
+    });
+
+    let reviewerNote = null;
+    if (note) {
+      reviewerNote = await addSubmissionReviewerNote({
+        submissionId,
+        authorId: req.user?.userId,
+        message: note,
+        visibleToSubmitter,
+      });
+    }
+
+    await writeAdminLog(req.user?.userId, "SUBMISSION_STATUS_CHANGED", "OrganismUpload", submissionId, {
+      status: requestedStatus,
+      visibleToSubmitter,
+    });
+
+    res.json({ message: "Submission status updated", submission: buildSubmissionResponse(upload), note: reviewerNote });
+  } catch (error) {
+    console.error("Submission Status Update Error:", error);
+    res.status(500).json({ error: "Failed to update submission status" });
+  }
+});
+
 app.patch('/api/admin/organism-uploads/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const uploadId = parseStringParam(req.params.id);
@@ -1409,12 +1991,13 @@ app.patch('/api/admin/organism-uploads/:id', requireAdmin, async (req: Authentic
     if ("error" in payload) {
       return res.status(400).json({ error: payload.error });
     }
+    const reviewNote = reviewNoteValue(req.body.reviewNote);
 
     const updated = await prisma.organismUpload.update({
       where: { id: uploadId },
       data: {
         ...payload.data,
-        reviewNote: textValue(req.body.reviewNote, 2000),
+        reviewNote,
       },
       include: {
         submittedBy: { select: { id: true, name: true, email: true, role: true, affiliation: true } },
@@ -1422,7 +2005,18 @@ app.patch('/api/admin/organism-uploads/:id', requireAdmin, async (req: Authentic
       },
     });
 
-    await writeAdminLog(req.user?.userId, "ORGANISM_UPLOAD_EDITED", "OrganismUpload", uploadId);
+    if (reviewNote && reviewNote !== existing.reviewNote) {
+      await addSubmissionReviewerNote({
+        submissionId: uploadId,
+        authorId: req.user?.userId,
+        message: reviewNote,
+        visibleToSubmitter: true,
+      });
+    }
+
+    await writeAdminLog(req.user?.userId, "ORGANISM_UPLOAD_EDITED", "OrganismUpload", uploadId, {
+      reviewerNoteUpdated: Boolean(reviewNote && reviewNote !== existing.reviewNote),
+    });
     res.json(updated);
   } catch (error) {
     console.error("Admin Upload Update Error:", error);
@@ -1436,7 +2030,7 @@ app.post('/api/admin/organism-uploads/:id/approve', requireAdmin, async (req: Au
     const upload = await prisma.organismUpload.findUnique({ where: { id: uploadId } });
     if (!upload) return res.status(404).json({ error: "Organism upload not found" });
 
-    const reviewNote = textValue(req.body.reviewNote, 2000);
+    const reviewNote = reviewNoteValue(req.body.reviewNote);
     const result = await prisma.$transaction(async (tx) => {
       const organismData = organismPublicationData(upload);
       const organism = await tx.organism.upsert({
@@ -1482,6 +2076,28 @@ app.post('/api/admin/organism-uploads/:id/approve', requireAdmin, async (req: Au
       organismId: result.organism.id,
       strainId: result.strain.id,
     });
+    await recordSubmissionStatusHistory({
+      submissionId: uploadId,
+      status: "APPROVED",
+      actorId: req.user?.userId,
+      note: reviewNote,
+      visibleToSubmitter: true,
+    });
+    await recordSubmissionStatusHistory({
+      submissionId: uploadId,
+      status: "PUBLISHED",
+      actorId: req.user?.userId,
+      note: "Approved submission published to the public organism database.",
+      visibleToSubmitter: true,
+    });
+    if (reviewNote) {
+      await addSubmissionReviewerNote({
+        submissionId: uploadId,
+        authorId: req.user?.userId,
+        message: reviewNote,
+        visibleToSubmitter: true,
+      });
+    }
 
     res.json({ message: "Organism upload approved and published", ...result });
   } catch (error) {
@@ -1493,13 +2109,17 @@ app.post('/api/admin/organism-uploads/:id/approve', requireAdmin, async (req: Au
 app.post('/api/admin/organism-uploads/:id/reject', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const uploadId = parseStringParam(req.params.id);
+    const reviewNote = reviewNoteValue(req.body.reviewNote);
+    if (!reviewNote) {
+      return res.status(400).json({ error: "A reviewer note is required to reject a submission" });
+    }
     const upload = await prisma.organismUpload.update({
       where: { id: uploadId },
       data: {
         status: ApprovalStatus.REJECTED,
         reviewedById: req.user?.userId,
         reviewedAt: new Date(),
-        reviewNote: textValue(req.body.reviewNote, 2000) || "Rejected by BMGA admin review.",
+        reviewNote,
       },
       include: {
         submittedBy: { select: { id: true, name: true, email: true, role: true, affiliation: true } },
@@ -1507,6 +2127,19 @@ app.post('/api/admin/organism-uploads/:id/reject', requireAdmin, async (req: Aut
       },
     });
 
+    await recordSubmissionStatusHistory({
+      submissionId: uploadId,
+      status: "REJECTED",
+      actorId: req.user?.userId,
+      note: reviewNote,
+      visibleToSubmitter: true,
+    });
+    await addSubmissionReviewerNote({
+      submissionId: uploadId,
+      authorId: req.user?.userId,
+      message: reviewNote,
+      visibleToSubmitter: true,
+    });
     await writeAdminLog(req.user?.userId, "ORGANISM_UPLOAD_REJECTED", "OrganismUpload", uploadId);
     res.json({ message: "Organism upload rejected", upload });
   } catch (error) {
@@ -1543,6 +2176,32 @@ app.get('/api/admin/blog-posts', requireAdmin, async (req: Request, res: Respons
   } catch (error) {
     console.error("Admin Blog Fetch Error:", error);
     res.status(500).json({ error: "Failed to fetch blog posts" });
+  }
+});
+
+app.get('/api/admin/blog-posts/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const postId = parseStringParam(req.params.id);
+    const post = await prisma.blogPost.findUnique({
+      where: { id: postId },
+      include: {
+        author: { select: { id: true, name: true, email: true, role: true, affiliation: true } },
+        reviewedBy: { select: { id: true, name: true, email: true, role: true } },
+      },
+    });
+
+    if (!post) return res.status(404).json({ error: "Blog post not found" });
+
+    await writeAdminLog(req.user?.userId, "BLOG_POST_DETAIL_VIEWED", "BlogPost", postId, {
+      status: post.status,
+      title: post.title,
+    });
+
+    const auditLogs = await targetAuditLogs("BlogPost", postId);
+    res.json({ post, auditLogs });
+  } catch (error) {
+    console.error("Admin Blog Detail Error:", error);
+    res.status(500).json({ error: "Failed to fetch blog post detail" });
   }
 });
 
@@ -1625,13 +2284,58 @@ app.post('/api/admin/blog-posts/:id/reject', requireAdmin, async (req: Authentic
 });
 
 app.delete('/api/admin/blog-posts/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const postId = parseStringParam(req.params.id);
   try {
-    const postId = parseStringParam(req.params.id);
+    if (!postId) {
+      await writeAdminLog(req.user?.userId, "BLOG_POST_DELETE_ATTEMPT", "BlogPost", undefined, {
+        result: "failure",
+        reason: "invalid_blog_post_id",
+        statusCode: 400,
+      });
+      return res.status(400).json({ error: "Invalid blog post id" });
+    }
+
+    const post = await prisma.blogPost.findUnique({
+      where: { id: postId },
+      include: {
+        author: { select: { id: true, email: true, name: true, role: true } },
+      },
+    });
+
+    if (!post) {
+      await writeAdminLog(req.user?.userId, "BLOG_POST_DELETE_ATTEMPT", "BlogPost", postId, {
+        result: "failure",
+        reason: "not_found",
+        statusCode: 404,
+      });
+      return res.status(404).json({ error: "Blog post not found" });
+    }
+
+    if (!destructiveConfirmationMatches(req.body?.confirmTitle, post.title)) {
+      await writeAdminLog(req.user?.userId, "BLOG_POST_DELETE_ATTEMPT", "BlogPost", postId, {
+        result: "failure",
+        reason: "confirmation_mismatch",
+        title: post.title,
+        authorEmail: post.author.email,
+        statusCode: 400,
+      });
+      return res.status(400).json({ error: "Type the blog post title or DELETE to confirm deletion" });
+    }
+
     await prisma.blogPost.delete({ where: { id: postId } });
-    await writeAdminLog(req.user?.userId, "BLOG_POST_DELETED", "BlogPost", postId);
+    await writeAdminLog(req.user?.userId, "BLOG_POST_DELETED", "BlogPost", postId, {
+      title: post.title,
+      authorEmail: post.author.email,
+      status: post.status,
+    });
     res.json({ message: "Blog post deleted" });
   } catch (error) {
     console.error("Admin Blog Delete Error:", error);
+    await writeAdminLog(req.user?.userId, "BLOG_POST_DELETE_ATTEMPT", "BlogPost", postId || undefined, {
+      result: "failure",
+      reason: "server_error",
+      statusCode: 500,
+    });
     res.status(500).json({ error: "Failed to delete blog post" });
   }
 });
@@ -1677,6 +2381,80 @@ app.patch('/api/admin/organisms/:id/metadata', requireAdmin, async (req: Request
   } catch (error) {
     console.error("Organism Metadata Update Error:", error);
     res.status(500).json({ error: "Failed to update organism metadata" });
+  }
+});
+
+app.delete('/api/admin/organisms/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const organismId = parseNumericParam(req.params.id);
+  try {
+    if (!organismId) {
+      await writeAdminLog(req.user?.userId, "ORGANISM_DELETE_ATTEMPT", "Organism", undefined, {
+        result: "failure",
+        reason: "invalid_organism_id",
+        statusCode: 400,
+      });
+      return res.status(400).json({ error: "Invalid organism id" });
+    }
+
+    const organism = await prisma.organism.findUnique({
+      where: { id: organismId },
+      include: {
+        _count: {
+          select: {
+            strains: true,
+            toolRuns: true,
+          },
+        },
+      },
+    });
+
+    if (!organism) {
+      await writeAdminLog(req.user?.userId, "ORGANISM_DELETE_ATTEMPT", "Organism", String(organismId), {
+        result: "failure",
+        reason: "not_found",
+        statusCode: 404,
+      });
+      return res.status(404).json({ error: "Organism not found" });
+    }
+
+    if (!destructiveConfirmationMatches(req.body?.confirmScientificName, organism.scientificName)) {
+      await writeAdminLog(req.user?.userId, "ORGANISM_DELETE_ATTEMPT", "Organism", String(organismId), {
+        result: "failure",
+        reason: "confirmation_mismatch",
+        scientificName: organism.scientificName,
+        statusCode: 400,
+      });
+      return res.status(400).json({ error: "Type the organism scientific name or DELETE to confirm full deletion" });
+    }
+
+    const publishedSubmissionCount = await prisma.organismUpload.count({ where: { publishedOrganismId: organismId } });
+    await prisma.$transaction(async (tx) => {
+      await tx.organismUpload.updateMany({
+        where: { publishedOrganismId: organismId },
+        data: {
+          publishedOrganismId: null,
+          publishedStrainId: null,
+        },
+      });
+      await tx.organism.delete({ where: { id: organismId } });
+    });
+
+    await writeAdminLog(req.user?.userId, "ORGANISM_DELETED", "Organism", String(organismId), {
+      scientificName: organism.scientificName,
+      strains: organism._count.strains,
+      toolRuns: organism._count.toolRuns,
+      affectedPublishedSubmissions: publishedSubmissionCount,
+    });
+
+    res.json({ message: "Organism and associated genome/result records deleted" });
+  } catch (error) {
+    console.error("Organism Delete Error:", error);
+    await writeAdminLog(req.user?.userId, "ORGANISM_DELETE_ATTEMPT", "Organism", organismId ? String(organismId) : undefined, {
+      result: "failure",
+      reason: "server_error",
+      statusCode: 500,
+    });
+    res.status(500).json({ error: "Failed to delete organism data" });
   }
 });
 
