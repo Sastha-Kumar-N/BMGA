@@ -15,6 +15,7 @@ import {
   Database,
   Dna,
   FlaskConical,
+  Globe2,
   LogOut,
   Mail,
   MapPin,
@@ -24,6 +25,7 @@ import {
   ShieldAlert,
   Sprout,
   UsersRound,
+  UploadCloud,
   Waves,
 } from 'lucide-react';
 import { apiPath } from './lib/api-client';
@@ -103,9 +105,10 @@ const CONTACT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const navItems = [
   { label: 'Home', href: '#home' },
   { label: 'Analysis', href: '#analysis' },
+  { label: 'Global Surveillance', href: '/surveillance' },
   { label: 'Our Projects', href: '#projects' },
   { label: 'Blog', href: '/blog' },
-  { label: 'Our Team', href: '/team' },
+  { label: 'About Us', href: '/about' },
   { label: 'Contact Us', href: '#contact' },
 ];
 
@@ -117,7 +120,7 @@ const workflowSteps: Array<{
 }> = [
   {
     title: 'Collect',
-    body: 'Samples from clinical, agricultural, food, and environmental sources across India.',
+    body: 'Samples from clinical, agricultural, food, and environmental sources across India and approved global partners.',
     icon: FlaskConical,
     tone: 'text-orange-600 bg-orange-50',
   },
@@ -135,7 +138,7 @@ const workflowSteps: Array<{
   },
   {
     title: 'Map',
-    body: 'Geospatial mapping of strains, sources, and AMR signals across India.',
+    body: 'Separate India and global views for geospatial strain, source, and AMR signals.',
     icon: MapPin,
     tone: 'text-orange-600 bg-orange-50',
   },
@@ -334,6 +337,8 @@ export default function HomePage() {
       title: 'Platform',
       links: [
         { label: 'Dashboard', href: '/dashboard' },
+        { label: 'Global Surveillance', href: '/surveillance' },
+        { label: 'FAIR Data Gateway', href: '/fair' },
         { label: 'Analysis', href: '/#analysis' },
         { label: 'Organism Atlas', href: '/dashboard#india-atlas' },
         { label: 'MAYA Results', href: mayaResultsHref },
@@ -346,15 +351,17 @@ export default function HomePage() {
         accountResourceLink,
         { label: 'User Guide', href: '/#guide' },
         { label: 'Downloads', href: '/#downloads' },
+        { label: 'Cookie Notice', href: '/cookies' },
       ],
     },
     {
       title: 'About',
       links: [
         { label: 'Our Projects', href: '/#projects' },
-        { label: 'Our Team', href: '/team' },
+        { label: 'About Us', href: '/about' },
         { label: 'Contact Us', href: '/#contact' },
         { label: 'Accessibility', href: '/#accessibility' },
+        { label: 'Privacy & Data Use', href: '/privacy' },
       ],
     },
   ];
@@ -462,19 +469,18 @@ export default function HomePage() {
         <div className="relative mx-auto grid min-h-[720px] max-w-7xl items-center gap-10 px-5 py-16 md:px-8 lg:grid-cols-[0.8fr_1.2fr] lg:py-20">
           <div className="max-w-xl">
             <h1 className="text-5xl font-black leading-[0.95] tracking-tight md:text-7xl">
-              Mapping India&apos;s Microbial Genome Landscape
+              Mapping Microbial Genomes Across India and the World
             </h1>
             <p className="mt-7 max-w-lg text-base font-medium leading-8 text-slate-300 md:text-lg">
-              BMGA catalogues, analyzes, and visualizes microbial genomics data to advance public health,
-              agriculture, environmental research, and AMR surveillance across India.
+              BMGA catalogues, analyzes, and visualizes approved microbial genomics data for India while connecting international strain and MAYA results through a dedicated global surveillance workspace.
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link href="/dashboard" className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-6 py-4 text-sm font-black text-white shadow-xl shadow-orange-500/25 transition hover:bg-orange-400">
-                Explore Dashboard <ArrowRight size={17} />
+                Explore India Dashboard <ArrowRight size={17} />
               </Link>
-              <Link href={session ? '/account' : '/register'} className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 px-6 py-4 text-sm font-black text-white transition hover:border-orange-300 hover:text-orange-300">
-                {session ? 'Account Dashboard' : 'Create Account'} <UsersRound size={17} />
+              <Link href="/surveillance" className="inline-flex items-center justify-center gap-2 rounded-xl border border-teal-300/50 px-6 py-4 text-sm font-black text-teal-100 transition hover:border-teal-200 hover:bg-teal-500/10">
+                Global Surveillance <Globe2 size={17} />
               </Link>
             </div>
 
@@ -493,6 +499,25 @@ export default function HomePage() {
           </div>
 
           <HomeIndiaMap strains={strains} loading={loading} error={dataError} />
+        </div>
+      </section>
+
+      <section id="surveillance" className="border-y border-teal-200 bg-[#eefafa] px-5 py-16 md:px-8">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+          <div>
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-teal-700 text-white"><Globe2 size={24} /></div>
+            <h2 className="mt-5 text-4xl font-black tracking-tight text-[#0B1B3A]">Global Genomic Surveillance</h2>
+            <p className="mt-4 max-w-2xl text-base font-bold leading-7 text-slate-600">A clearly separated BMGA workspace for approved strain records and MAYA outputs from around the world, with live database summaries, global mapping, AMR insights, evidence labels, and data-freshness reporting.</p>
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <Link href="/surveillance" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-teal-700 px-5 text-sm font-black text-white transition hover:bg-teal-800">Open Global Dashboard <ArrowRight size={16} /></Link>
+              <Link href={session ? '/surveillance/submit' : '/login'} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-teal-300 bg-white px-5 text-sm font-black text-teal-900 transition hover:bg-teal-50">{session ? 'Submit Global Data' : 'Sign In to Contribute'} <UploadCloud size={16} /></Link>
+            </div>
+          </div>
+          <div className="divide-y divide-teal-200 border-y border-teal-200 bg-white">
+            <SurveillanceSignal icon={Database} title="Approved records only" body="Pending submissions and private storage references never appear in public surveillance views." />
+            <SurveillanceSignal icon={ShieldAlert} title="Evidence-aware AMR" body="Genotypic MAYA detections remain explicitly distinct from linked phenotypic susceptibility evidence." />
+            <SurveillanceSignal icon={CheckCircle2} title="Freshness and limitations" body="Every view reports response time, latest represented update, metadata coverage, and interpretation limits." />
+          </div>
         </div>
       </section>
 
@@ -620,10 +645,11 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+          <div className="mt-10 grid gap-5 lg:grid-cols-4">
             {[
               { title: 'Organism Registry', body: 'Search live records by organism, strain, source, city, state, and genome metadata.', href: '/dashboard', icon: Database },
               { title: 'India Atlas', body: 'Open the dashboard atlas for location-based organism summaries and source intelligence.', href: '/dashboard#india-atlas', icon: MapPin },
+              { title: 'Global Surveillance', body: 'Explore approved worldwide strain records, AMR signals, provenance, and data quality.', href: '/surveillance', icon: Globe2 },
               { title: 'MAYA Results', body: firstOrganismId ? 'Open the first available organism result workspace from current live data.' : 'Open the dashboard and select an organism to view available MAYA outputs.', href: mayaResultsHref, icon: BarChart3 },
             ].map((item) => {
               const Icon = item.icon;
@@ -694,7 +720,7 @@ export default function HomePage() {
             <div className="mt-8 space-y-4 text-sm font-bold text-slate-300">
               <ContactLine icon={Mail} label="Platform coordination" value="BMGA collaboration desk" />
               <ContactLine icon={Phone} label="Access requests" value="Dashboard and data onboarding" />
-              <ContactLine icon={MapPin} label="Coverage" value="India-wide organism and source intelligence" />
+              <ContactLine icon={MapPin} label="Coverage" value="India atlas and global genomic surveillance" />
             </div>
           </div>
 
@@ -763,7 +789,7 @@ export default function HomePage() {
           <div>
             <BrandLogo variant="light" />
             <p className="mt-5 max-w-sm text-sm font-medium leading-7 text-slate-400">
-              A national platform for microbial genomics, MAYA results, and geospatial intelligence for a healthier and more resilient India.
+              A microbial genomics platform for India-focused discovery and responsible global surveillance of approved strain and MAYA data.
             </p>
           </div>
           {footerSections.map((section) => (
@@ -792,6 +818,15 @@ function ContactLine({ icon: Icon, label, value }: { icon: LucideIcon; label: st
         <p className="text-xs font-black uppercase tracking-widest text-slate-500">{label}</p>
         <p className="mt-1">{value}</p>
       </div>
+    </div>
+  );
+}
+
+function SurveillanceSignal({ icon: Icon, title, body }: { icon: LucideIcon; title: string; body: string }) {
+  return (
+    <div className="flex gap-4 p-5">
+      <Icon className="mt-0.5 shrink-0 text-teal-700" size={21} />
+      <div><h3 className="text-sm font-black text-[#0B1B3A]">{title}</h3><p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{body}</p></div>
     </div>
   );
 }

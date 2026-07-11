@@ -112,6 +112,8 @@ export default function AdminPortal() {
     country: 'India',
     state: '',
     city: '',
+    collectionDate: '',
+    locationText: '',
     latitude: '',
     longitude: '',
     biosampleAccession: '',
@@ -121,6 +123,12 @@ export default function AdminPortal() {
     genomeSize: '',
     gcContent: '',
     repoLink: '',
+    surveillanceScope: 'NATIONAL',
+    evidenceBasis: 'GENOTYPIC',
+    submittingInstitution: '',
+    dataSource: '',
+    dataUseLimitations: '',
+    lastVerifiedAt: '',
     metadata: '{}',
   });
 
@@ -407,10 +415,18 @@ export default function AdminPortal() {
                 <TextInput label="Country" value={strainForm.country} onChange={(value) => setStrainForm({ ...strainForm, country: value })} />
                 <TextInput label="State" value={strainForm.state} onChange={(value) => setStrainForm({ ...strainForm, state: value })} />
                 <TextInput label="City" value={strainForm.city} onChange={(value) => setStrainForm({ ...strainForm, city: value })} />
+                <TextInput label="Collection Date" value={strainForm.collectionDate} onChange={(value) => setStrainForm({ ...strainForm, collectionDate: value })} />
+                <TextInput label="Location Description" value={strainForm.locationText} onChange={(value) => setStrainForm({ ...strainForm, locationText: value })} />
                 <TextInput label="Latitude" value={strainForm.latitude} onChange={(value) => setStrainForm({ ...strainForm, latitude: value })} />
                 <TextInput label="Longitude" value={strainForm.longitude} onChange={(value) => setStrainForm({ ...strainForm, longitude: value })} />
                 <TextInput label="Repository Link" value={strainForm.repoLink} onChange={(value) => setStrainForm({ ...strainForm, repoLink: value })} />
+                <SelectInput label="Surveillance Scope" value={strainForm.surveillanceScope} onChange={(value) => setStrainForm({ ...strainForm, surveillanceScope: value })} options={[{ value: 'NATIONAL', label: 'National surveillance' }, { value: 'GLOBAL', label: 'Global surveillance' }]} />
+                <SelectInput label="Evidence Basis" value={strainForm.evidenceBasis} onChange={(value) => setStrainForm({ ...strainForm, evidenceBasis: value })} options={[{ value: 'GENOTYPIC', label: 'Genotypic' }, { value: 'PHENOTYPIC', label: 'Phenotypic' }, { value: 'COMBINED', label: 'Combined' }, { value: 'NOT_REPORTED', label: 'Not reported' }]} />
+                <TextInput label="Submitting Institution" value={strainForm.submittingInstitution} onChange={(value) => setStrainForm({ ...strainForm, submittingInstitution: value })} />
+                <TextInput label="Data Source / Programme" value={strainForm.dataSource} onChange={(value) => setStrainForm({ ...strainForm, dataSource: value })} />
+                <TextInput label="Last Verified (YYYY-MM-DD)" value={strainForm.lastVerifiedAt} onChange={(value) => setStrainForm({ ...strainForm, lastVerifiedAt: value })} />
               </div>
+              <TextArea label="Data Use Limitations" value={strainForm.dataUseLimitations} onChange={(value) => setStrainForm({ ...strainForm, dataUseLimitations: value })} rows={3} />
               <TextArea label="Additional Metadata JSON" value={strainForm.metadata} onChange={(value) => setStrainForm({ ...strainForm, metadata: value })} rows={5} />
               <PrimaryButton label="Register Genome Metadata" loading={status.type === 'loading'} />
             </form>

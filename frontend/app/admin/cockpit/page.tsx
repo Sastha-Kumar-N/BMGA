@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertCircle, BookOpenCheck, ClipboardCheck, Database, History, Home, Inbox, LayoutDashboard, Search, ShieldCheck, Trash2, UsersRound } from 'lucide-react';
+import { AlertCircle, BookOpenCheck, ClipboardCheck, Database, Globe2, History, Home, Inbox, LayoutDashboard, Search, ShieldCheck, Trash2, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
@@ -199,6 +199,9 @@ export default function AdminCockpitPage() {
               <Link href="/dashboard" className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-500/20 transition hover:bg-orange-400">
                 <LayoutDashboard size={15} /> Dashboard
               </Link>
+              <Link href="/surveillance" className="inline-flex items-center justify-center gap-2 rounded-xl border border-teal-300/40 bg-teal-500/10 px-4 py-3 text-xs font-black uppercase tracking-widest text-teal-100 transition hover:bg-teal-500/20">
+                <Globe2 size={15} /> Surveillance
+              </Link>
             </div>
           </div>
         </header>
@@ -212,12 +215,13 @@ export default function AdminCockpitPage() {
           <MetricCard icon={History} label="Audit Events" value={loading ? '...' : String(auditEvents)} href="/admin/audit-logs" />
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-5">
+        <section className="grid gap-5 lg:grid-cols-3 xl:grid-cols-6">
           <AdminLink href="/admin/users" title="User Privilege Management" body="Assign Normal User, Contributor, Moderator, or Admin privileges." />
           <AdminLink href="/admin/uploads" title="Pending Organism Review" body="Edit, approve, reject, or request changes for submitted organism metadata." />
           <AdminLink href="/admin/blogs" title="Blog Approval Management" body="Review submitted blog posts before public publication." />
           <AdminLink href="/admin/contact-messages" title={`Contact Messages (${loading ? '...' : unreadMessages})`} body="Read public collaboration requests and manage read or unread follow-up status." />
           <AdminLink href="/admin/audit-logs" title="Admin Audit Logs" body="Inspect account, review, approval, and ingestion activity across the portal." />
+          <AdminLink href="/surveillance" title="Global Surveillance" body="Inspect the public world dashboard after approved records and MAYA results are published." />
         </section>
 
         {session?.user?.role === 'ADMIN' && (

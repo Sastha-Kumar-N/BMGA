@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">Sivasakthi Science Foundation logo placeholder</title>
+  <desc id="desc">Placeholder logo for Sivasakthi Science Foundation.</desc>
+  <rect width="320" height="320" rx="44" fill="#ecfeff"/>
+  <circle cx="160" cy="122" r="62" fill="#0b1b3a"/>
+  <path d="M118 124c28-32 56-32 84 0M118 160c28 32 56 32 84 0" fill="none" stroke="#06b6d4" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="124" cy="124" r="11" fill="#ff6b00"/>
+  <circle cx="196" cy="124" r="11" fill="#ff6b00"/>
+  <circle cx="124" cy="160" r="11" fill="#ffffff"/>
+  <circle cx="196" cy="160" r="11" fill="#ffffff"/>
+  <text x="160" y="224" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#0b1b3a">SIVASAKTHI</text>
+  <text x="160" y="252" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="800" letter-spacing="2" fill="#0891b2">SCIENCE FOUNDATION</text>
+</svg>

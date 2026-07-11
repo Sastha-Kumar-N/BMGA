@@ -54,6 +54,7 @@ export type OrganismResultsResponse = {
       sourceType?: string | null;
       city?: string | null;
       country?: string | null;
+      referenceKinds?: string[];
     }>;
   };
   summary: Record<string, unknown>;

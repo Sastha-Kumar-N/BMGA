@@ -10,6 +10,7 @@ import {
   Clock3,
   Database,
   FilePlus2,
+  Globe2,
   Home,
   LayoutDashboard,
   LogOut,
@@ -101,8 +102,9 @@ export default function AccountPage() {
         </button>
       </header>
 
-      <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
         <ActionCard href="/dashboard" icon={LayoutDashboard} title="Main Dashboard" body="Open the India atlas and public organism database." />
+        <ActionCard href="/surveillance" icon={Globe2} title="Global Surveillance" body="Explore worldwide strain records, AMR insights, and data freshness." />
         <ActionCard href="/submit-organism" icon={FilePlus2} title="Submit Organism" body="Upload organism and genome metadata for admin approval." />
         <ActionCard
           href={canCreateBlog ? '/blog/create' : '/blog'}

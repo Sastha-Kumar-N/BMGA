@@ -10,9 +10,12 @@ import {
   AlertTriangle,
   ArrowUpRight,
   BarChart3,
+  Binary,
   CheckCircle2,
+  Clock3,
   Database,
   Dna,
+  FileSearch,
   FlaskConical,
   Globe2,
   LayoutDashboard,
@@ -23,6 +26,7 @@ import {
   RefreshCcw,
   Search,
   ShieldAlert,
+  TestTube2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../lib/api-client';
@@ -61,6 +65,10 @@ type StrainRecord = AtlasStrain & {
   genomeStatus?: string | null;
   metadata?: Record<string, unknown> | null;
   createdAt?: string | null;
+  updatedAt?: string | null;
+  evidenceBasis?: string | null;
+  lastVerifiedAt?: string | null;
+  referenceKinds?: string[];
 };
 
 type AmrAlert = {
@@ -309,6 +317,14 @@ export default function Dashboard() {
     router.push(`/organisms/${organismId}/results`);
   };
 
+  const openGenomeTools = (tool: 'jbrowse' | 'igv' | 'blast' = 'jbrowse') => {
+    if (!selectedStrain?.organismId || !selectedStrain.id) return;
+    router.push(`/organisms/${selectedStrain.organismId}/genome?strain=${selectedStrain.id}&tool=${tool}`);
+  };
+  const openGenomeToolsFor = (strain: StrainRecord) => {
+    router.push(`/organisms/${strain.organismId}/genome?strain=${strain.id}`);
+  };
+
   const scrollToAtlas = () => {
     document.getElementById('india-atlas')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
@@ -335,12 +351,21 @@ export default function Dashboard() {
           <SidebarButton active icon={LayoutDashboard} label="Dashboard" onClick={() => setSelectedStrainId('')} />
           <SidebarButton icon={MapPin} label="India Atlas" onClick={scrollToAtlas} />
           <SidebarButton icon={Microscope} label="MAYA Results" onClick={() => openOrganismResults(selectedStrain?.organismId)} disabled={!selectedStrain} />
+          <SidebarButton icon={Binary} label="Genome Toolset" onClick={() => openGenomeTools()} disabled={!selectedStrain} />
+          <Link href="/surveillance" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold text-teal-200 transition hover:bg-teal-500/10 hover:text-white">
+            <Globe2 size={17} />
+            Global Surveillance
+          </Link>
           {session?.user?.role === 'ADMIN' && (
             <Link href="/admin" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold text-slate-300 transition hover:bg-white/5 hover:text-white">
               <Lock size={17} />
               Admin Portal
             </Link>
           )}
+          <Link href="/fair" className="flex items-center gap-3 rounded-md px-4 py-3 text-sm font-bold text-slate-300 transition hover:bg-white/5 hover:text-white">
+            <FileSearch size={17} />
+            FAIR Data
+          </Link>
         </nav>
 
         <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -374,8 +399,9 @@ export default function Dashboard() {
         <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 px-5 py-4 backdrop-blur md:px-8">
           <div className="mx-auto flex max-w-7xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h1 className="text-3xl font-black tracking-tight text-[#0B1B3A] md:text-4xl">Genome Intelligence Dashboard</h1>
-              <p className="mt-1 text-sm font-bold text-slate-500">National organism registry, MAYA outputs, and geospatial source intelligence.</p>
+              <h1 className="text-3xl font-black tracking-tight text-[#0B1B3A] md:text-4xl">India Genomic Surveillance</h1>
+              <p className="mt-1 text-sm font-bold text-slate-500">Approved national genome records, MAYA evidence, AMR signals, and interoperable reference tools.</p>
+              <Link href="/surveillance" className="mt-3 inline-flex items-center gap-2 text-xs font-black uppercase text-teal-700 xl:hidden"><Globe2 size={15} /> Global Surveillance</Link>
             </div>
 
             <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -407,7 +433,9 @@ export default function Dashboard() {
           </div>
         </header>
 
-        <div className="mx-auto max-w-7xl space-y-8 px-5 py-8 md:px-8">
+        <div className="mx-auto max-w-[1500px] space-y-6 px-5 py-6 md:px-8">
+          <DataFreshnessBanner strains={activeResultStrains} />
+
           <OperationalMetricsStrip
             strains={activeResultStrains}
             allStrains={strains}
@@ -415,8 +443,33 @@ export default function Dashboard() {
             allAlerts={summaryData.recentAmr}
           />
 
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <section id="india-atlas" className="scroll-mt-24 grid gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
+            <div className="min-w-0 border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+              <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase text-orange-600">National geospatial registry</p>
+                  <h2 className="mt-1 text-2xl font-black tracking-tight text-[#0B1B3A]">India Organism Atlas</h2>
+                  <p className="mt-1 max-w-3xl text-xs font-bold leading-5 text-slate-500">Markers are generated from current approved latitude and longitude records. Select a point to synchronize the dossier, registry, AMR signals, and genome tools.</p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase text-slate-500">
+                  <span className="bg-slate-100 px-3 py-2">{mappedPointCount} mapped</span>
+                  <span className="bg-orange-50 px-3 py-2 text-orange-700">{activeResultStrains.length} active records</span>
+                </div>
+              </div>
+              <IndiaOrganismAtlas
+                strains={activeResultStrains}
+                activeStrainId={selectedStrainId ? selectedStrain?.id : null}
+                onOpenOrganism={openOrganismResults}
+              />
+            </div>
+            <div className="space-y-5">
+              <SelectedDossier strain={selectedStrain} onOpenOrganism={openOrganismResults} onOpenGenome={openGenomeTools} />
+              <EvidenceBoundary />
+            </div>
+          </section>
+
+          <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-col gap-3 border-b border-slate-100 px-6 py-5 md:flex-row md:items-center md:justify-between">
                 <div>
                   <h2 className="text-xl font-black tracking-tight text-[#0B1B3A]">Organism Registry</h2>
@@ -424,7 +477,7 @@ export default function Dashboard() {
                 </div>
                 <button
                   onClick={scrollToAtlas}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-xs font-black uppercase tracking-widest text-[#0B1B3A] transition hover:border-orange-500 hover:text-orange-600"
+                  className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 px-4 py-2 text-xs font-black uppercase text-[#0B1B3A] transition hover:border-orange-500 hover:text-orange-600"
                 >
                   View atlas <ArrowUpRight size={14} />
                 </button>
@@ -435,37 +488,15 @@ export default function Dashboard() {
                 selectedId={selectedStrain?.id || null}
                 onSelect={(strainId) => setSelectedStrainId(strainId.toString())}
                 onOpenOrganism={openOrganismResults}
+                onOpenGenome={openGenomeToolsFor}
               />
             </div>
-
-            <SelectedDossier strain={selectedStrain} onOpenOrganism={openOrganismResults} />
+            <GenomeToolsetPanel strain={selectedStrain} onOpen={openGenomeTools} />
           </section>
 
-          <section className="grid gap-6 lg:grid-cols-2">
-            <SamplingSourceDonut strains={activeResultStrains} totalRecords={strains.length} />
-
+          <section className="grid gap-5 lg:grid-cols-2">
             <AmrPanel alerts={activeAlerts} strains={activeResultStrains} onSelect={(strainId) => setSelectedStrainId(strainId.toString())} />
-          </section>
-
-          <section id="india-atlas" className="scroll-mt-24 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-7">
-            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h2 className="text-3xl font-black tracking-tight text-[#0B1B3A]">India Organism Atlas</h2>
-                <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-500">
-                  Each point represents a strain with geographic metadata. Open a point to review organism, source, accession, genome size, and GC details, then route directly to its genomics results page.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
-                <span className="rounded-full bg-slate-100 px-3 py-2">{mappedPointCount} mapped points</span>
-                <span className="rounded-full bg-slate-100 px-3 py-2">{activeResultStrains.length} result records</span>
-                <span className="rounded-full bg-orange-50 px-3 py-2 text-orange-600">Click marker for dossier</span>
-              </div>
-            </div>
-            <IndiaOrganismAtlas
-              strains={activeResultStrains}
-              activeStrainId={selectedStrainId ? selectedStrain?.id : null}
-              onOpenOrganism={openOrganismResults}
-            />
+            <SamplingSourceDonut strains={activeResultStrains} totalRecords={strains.length} />
           </section>
         </div>
 
@@ -490,7 +521,7 @@ function SidebarButton({ active = false, disabled = false, icon: Icon, label, on
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-bold transition ${
+      className={`flex w-full items-center gap-3 rounded-md px-4 py-3 text-left text-sm font-bold transition ${
         active
           ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20'
           : disabled
@@ -501,6 +532,63 @@ function SidebarButton({ active = false, disabled = false, icon: Icon, label, on
       <Icon size={17} />
       {label}
     </button>
+  );
+}
+
+function DataFreshnessBanner({ strains }: { strains: StrainRecord[] }) {
+  const timestamps = strains
+    .map((strain) => strain.lastVerifiedAt || strain.updatedAt || strain.createdAt)
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value))
+    .filter((value) => Number.isFinite(value.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime());
+  const latest = timestamps[0];
+  const genotypic = strains.filter((strain) => strain.evidenceBasis === 'GENOTYPIC' || strain.evidenceBasis === 'COMBINED').length;
+  const phenotypic = strains.filter((strain) => strain.evidenceBasis === 'PHENOTYPIC' || strain.evidenceBasis === 'COMBINED').length;
+
+  return (
+    <section className="grid gap-px overflow-hidden border border-slate-200 bg-slate-200 md:grid-cols-[1.1fr_1fr_1fr_2fr]">
+      <SignalCell icon={Clock3} label="Data Freshness" value={latest ? latest.toLocaleString() : 'N/A'} tone="slate" />
+      <SignalCell icon={Dna} label="Genotypic Evidence" value={strains.length ? `${genotypic} records` : 'N/A'} tone="teal" />
+      <SignalCell icon={TestTube2} label="Phenotypic Evidence" value={strains.length ? `${phenotypic} records` : 'N/A'} tone="orange" />
+      <div className="bg-white px-5 py-4 text-xs font-semibold leading-5 text-slate-600">
+        Sequence-derived MAYA and AMR findings are genotypic unless linked laboratory susceptibility evidence is explicitly present. Freshness reflects the latest verified or updated record in the active dataset.
+      </div>
+    </section>
+  );
+}
+
+function SignalCell({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: string; tone: 'slate' | 'teal' | 'orange' }) {
+  const tones = { slate: 'text-slate-600 bg-slate-100', teal: 'text-teal-700 bg-teal-50', orange: 'text-orange-700 bg-orange-50' };
+  return <div className="flex items-center gap-3 bg-white px-5 py-4"><span className={`flex h-9 w-9 shrink-0 items-center justify-center ${tones[tone]}`}><Icon size={18} /></span><span><span className="block text-[9px] font-black uppercase text-slate-400">{label}</span><span className="mt-1 block text-xs font-black text-[#0B1B3A]">{value}</span></span></div>;
+}
+
+function EvidenceBoundary() {
+  return (
+    <section className="border border-amber-200 bg-amber-50 p-5">
+      <p className="text-[10px] font-black uppercase text-amber-700">Interpretation Boundary</p>
+      <p className="mt-2 text-sm font-semibold leading-6 text-amber-950">Dashboard alerts support surveillance review. They do not establish phenotype, transmission, pathogenicity, or a clinical treatment recommendation.</p>
+    </section>
+  );
+}
+
+function GenomeToolsetPanel({ strain, onOpen }: { strain: StrainRecord | null; onOpen: (tool: 'jbrowse' | 'igv' | 'blast') => void }) {
+  const referenceReady = Boolean(strain?.referenceKinds?.includes('FASTA') && strain.referenceKinds.includes('FAI'));
+  const tools: Array<{ id: 'jbrowse' | 'igv' | 'blast'; label: string; detail: string; icon: LucideIcon; requiresReference: boolean }> = [
+    { id: 'jbrowse', label: 'JBrowse 2', detail: 'Reference sequence and GFF3 annotations', icon: Binary, requiresReference: true },
+    { id: 'igv', label: 'IGV.js', detail: 'Interactive sequence and annotation tracks', icon: BarChart3, requiresReference: true },
+    { id: 'blast', label: 'NCBI BLAST+', detail: 'Similarity search across approved BMGA FASTA', icon: Search, requiresReference: false },
+  ];
+  return (
+    <aside className="border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 px-5 py-4"><p className="text-[10px] font-black uppercase text-orange-600">Integrated Analysis</p><h2 className="mt-1 text-xl font-black">Genomic Toolset</h2><p className="mt-1 text-xs font-semibold leading-5 text-slate-500">Tools are bound to the selected strain and approved reference files.</p></div>
+      <div className="divide-y divide-slate-100">
+        {tools.map((tool) => {
+          const available = Boolean(strain) && (!tool.requiresReference || referenceReady);
+          return <button key={tool.id} type="button" onClick={() => onOpen(tool.id)} disabled={!strain} className="flex w-full items-center gap-3 px-5 py-4 text-left transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"><span className="flex h-10 w-10 shrink-0 items-center justify-center bg-[#0B1B3A] text-white"><tool.icon size={18} /></span><span className="min-w-0 flex-1"><span className="block text-sm font-black">{tool.label}</span><span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{tool.detail}</span></span><span className={`shrink-0 px-2 py-1 text-[9px] font-black uppercase ${available ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{available ? 'Open' : tool.requiresReference ? 'Needs FASTA' : 'Select strain'}</span></button>;
+        })}
+      </div>
+    </aside>
   );
 }
 
@@ -523,7 +611,7 @@ function OperationalMetricsStrip({ strains, allStrains, alerts, allAlerts }: {
     .join('   ') || 'No domain metadata';
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="overflow-hidden border border-slate-200 bg-white shadow-sm">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-7">
         <KpiCell
           icon={Database}
@@ -571,7 +659,7 @@ function OperationalMetricsStrip({ strains, allStrains, alerts, allAlerts }: {
         />
         <KpiCell
           icon={CheckCircle2}
-          label="Avg. Genome Coverage"
+          label="Metadata Completeness"
           value={`${genomeCoverageScore(strains).toFixed(1)}%`}
           detail={medianDepthLabel(strains)}
           tone="emerald"
@@ -605,7 +693,7 @@ function KpiCell({ icon: Icon, label, value, detail, tone, emphasis = false, rin
 
   return (
     <div className="flex min-h-28 items-center gap-4 border-b border-r border-slate-100 px-5 py-4">
-      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${toneClasses[tone]} ${ring ? 'ring-4 ring-emerald-100' : ''}`}>
+      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md ${toneClasses[tone]} ${ring ? 'ring-4 ring-emerald-100' : ''}`}>
         <Icon size={23} />
       </div>
       <div className="min-w-0">
@@ -622,13 +710,13 @@ function SamplingSourceDonut({ strains, totalRecords }: { strains: StrainRecord[
   const totalSamples = strains.length;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h2 className="text-xl font-black tracking-tight text-[#0B1B3A]">Sampling Sources (Top 5)</h2>
           <p className="mt-1 text-xs font-bold text-slate-500">Composition recalculates from the active dashboard result set.</p>
         </div>
-        <div className="rounded-xl bg-blue-50 p-3 text-blue-600">
+        <div className="rounded-md bg-blue-50 p-3 text-blue-600">
           <Database size={22} />
         </div>
       </div>
@@ -638,7 +726,7 @@ function SamplingSourceDonut({ strains, totalRecords }: { strains: StrainRecord[
           {data.length ? (
             <DonutChart data={data} total={totalSamples} />
           ) : (
-            <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-xs font-bold text-slate-400">
+            <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 text-xs font-bold text-slate-400">
               No source metadata
             </div>
           )}
@@ -732,12 +820,13 @@ function DonutChart({ data, total }: {
   );
 }
 
-function RegistryTable({ loading, strains, selectedId, onSelect, onOpenOrganism }: {
+function RegistryTable({ loading, strains, selectedId, onSelect, onOpenOrganism, onOpenGenome }: {
   loading: boolean;
   strains: StrainRecord[];
   selectedId: number | null;
   onSelect: (strainId: number) => void;
   onOpenOrganism: (organismId?: number | null) => void;
+  onOpenGenome: (strain: StrainRecord) => void;
 }) {
   if (loading) {
     return (
@@ -791,15 +880,7 @@ function RegistryTable({ loading, strains, selectedId, onSelect, onOpenOrganism 
                 <p className="mt-1">Assembly: {strain.assemblyAccession || 'N/A'}</p>
               </td>
               <td className="px-6 py-5 text-right">
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenOrganism(strain.organismId);
-                  }}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#0B1B3A] px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-orange-500"
-                >
-                  Genomics <ArrowUpRight size={13} />
-                </button>
+                <div className="flex justify-end gap-2"><button onClick={(event) => { event.stopPropagation(); onOpenOrganism(strain.organismId); }} className="inline-flex items-center gap-2 rounded-md bg-[#0B1B3A] px-3 py-2 text-xs font-black uppercase text-white transition hover:bg-orange-500">Results <ArrowUpRight size={13} /></button><button onClick={(event) => { event.stopPropagation(); onOpenGenome(strain); }} title="Open genome tools" aria-label={`Open genome tools for ${strain.strainName}`} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100"><Binary size={14} /></button></div>
               </td>
             </tr>
           ))}
@@ -817,12 +898,13 @@ function RegistryTable({ loading, strains, selectedId, onSelect, onOpenOrganism 
   );
 }
 
-function SelectedDossier({ strain, onOpenOrganism }: {
+function SelectedDossier({ strain, onOpenOrganism, onOpenGenome }: {
   strain: StrainRecord | null;
   onOpenOrganism: (organismId?: number | null) => void;
+  onOpenGenome: (tool: 'jbrowse' | 'igv' | 'blast') => void;
 }) {
   return (
-    <aside className="rounded-2xl border border-[#0B1B3A]/10 bg-[#0B1B3A] p-6 text-white shadow-sm">
+    <aside className="border border-[#0B1B3A]/10 bg-[#0B1B3A] p-6 text-white shadow-sm">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-[10px] font-black uppercase tracking-widest text-orange-300">Active Organism Dossier</p>
@@ -841,17 +923,16 @@ function SelectedDossier({ strain, onOpenOrganism }: {
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-3">
-        <MiniSignal icon={CheckCircle2} label="MAYA" value="Routable" />
-        <MiniSignal icon={BarChart3} label="Atlas" value={strain?.latitude && strain.longitude ? 'Mapped' : 'No GPS'} />
+        <MiniSignal icon={CheckCircle2} label="MAYA" value="Open results" />
+        <MiniSignal icon={BarChart3} label="Atlas" value={numericValue(strain?.latitude) !== null && numericValue(strain?.longitude) !== null ? 'Mapped' : 'No GPS'} />
+        <MiniSignal icon={Binary} label="Reference" value={strain?.referenceKinds?.includes('FASTA') ? 'FASTA ready' : 'No FASTA'} />
+        <MiniSignal icon={Dna} label="Evidence" value={strain?.evidenceBasis?.replaceAll('_', ' ') || 'N/A'} />
       </div>
 
-      <button
-        onClick={() => onOpenOrganism(strain?.organismId)}
-        disabled={!strain}
-        className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-xs font-black uppercase tracking-widest text-[#0B1B3A] transition hover:bg-orange-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Open genomics page <ArrowUpRight size={14} />
-      </button>
+      <div className="mt-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+        <button onClick={() => onOpenOrganism(strain?.organismId)} disabled={!strain} className="flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 text-xs font-black uppercase text-[#0B1B3A] transition hover:bg-orange-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50">MAYA results <ArrowUpRight size={14} /></button>
+        <button onClick={() => onOpenGenome('jbrowse')} disabled={!strain} className="flex w-full items-center justify-center gap-2 rounded-md border border-white/20 bg-white/5 px-4 py-3 text-xs font-black uppercase text-white transition hover:border-orange-400 hover:text-orange-300 disabled:cursor-not-allowed disabled:opacity-50">Genome workspace <Binary size={14} /></button>
+      </div>
     </aside>
   );
 }
@@ -867,7 +948,7 @@ function DossierRow({ label, value }: { label: string; value: string }) {
 
 function MiniSignal({ icon: Icon, label, value }: { icon: typeof Dna; label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-white/5 p-4">
+    <div className="rounded-md bg-white/5 p-4">
       <Icon size={18} className="text-orange-300" />
       <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</p>
       <p className="mt-1 text-sm font-black text-white">{value}</p>
@@ -881,11 +962,11 @@ function AmrPanel({ alerts, strains, onSelect }: {
   onSelect: (strainId: number) => void;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h2 className="text-xl font-black tracking-tight text-[#0B1B3A]">AMR Signal Watch</h2>
-          <p className="mt-1 text-xs font-bold text-slate-500">Recent resistance genes linked back to registry strains.</p>
+          <p className="mt-1 text-xs font-bold text-slate-500">Recent sequence-derived resistance genes linked to registry strains. Genotypic evidence only unless separately stated.</p>
         </div>
         <ShieldAlert className="text-red-500" size={24} />
       </div>

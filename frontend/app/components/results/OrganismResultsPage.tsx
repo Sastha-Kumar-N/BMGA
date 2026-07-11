@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BarChart3, Home, LayoutDashboard, RefreshCcw, ShieldAlert } from "lucide-react";
+import { BarChart3, Binary, Globe2, Home, LayoutDashboard, RefreshCcw, ShieldAlert } from "lucide-react";
 import { apiPath } from "../../lib/api-client";
 import BrandLogo from "../BrandLogo";
 import GenomeSummaryPanel from "./GenomeSummaryPanel";
@@ -108,6 +108,14 @@ export default function OrganismResultsPage({ organismId }: { organismId: string
             <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm transition hover:border-orange-300 hover:text-orange-600">
               <LayoutDashboard size={14} />
               Dashboard
+            </Link>
+            <Link href="/surveillance" className="inline-flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-teal-800 shadow-sm transition hover:border-teal-400 hover:bg-teal-100">
+              <Globe2 size={14} />
+              Surveillance
+            </Link>
+            <Link href={`/organisms/${organismId}/genome${results?.organism.strains[0]?.id ? `?strain=${results.organism.strains[0].id}` : ''}`} className="inline-flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-orange-800 shadow-sm transition hover:border-orange-400 hover:bg-orange-100">
+              <Binary size={14} />
+              Genome Tools
             </Link>
             <button type="button" onClick={() => scrollToSection("genome-summary")} className={sectionNavClass(activeSection === "summary")}>
               <BarChart3 size={14} />

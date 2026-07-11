@@ -64,6 +64,7 @@ type Submission = {
   description?: string | null;
   metadata?: Record<string, unknown> | null;
   files: SubmissionFile[];
+  genomeReferences?: SubmissionFile[];
   statusHistory: SubmissionHistoryEntry[];
   reviewerNotes: SubmissionReviewerNote[];
   createdAt: string;
@@ -196,6 +197,7 @@ export default function UserSubmissionDetailPage() {
             </section>
 
             <SubmissionFilesPanel files={submission.files || []} />
+            <SubmissionFilesPanel files={submission.genomeReferences || []} title="Genome References" eyebrow="FASTA & Annotation" emptyMessage="No FASTA or GFF3 reference files are attached to this submission." />
           </section>
 
           <aside className="space-y-6">

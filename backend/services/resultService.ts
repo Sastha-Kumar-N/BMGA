@@ -455,6 +455,10 @@ export async function getOrganismResults(prisma: PrismaClient, organismId: numbe
       strains: {
         include: {
           assemblies: { orderBy: { createdAt: "desc" }, take: 1 },
+          genomeReferences: {
+            where: { status: 'PUBLISHED', isPublic: true },
+            select: { kind: true },
+          },
           amrGenes: true,
           analysisRuns: {
             include: {
@@ -542,6 +546,7 @@ export async function getOrganismResults(prisma: PrismaClient, organismId: numbe
         sourceType: strain.sourceType,
         city: strain.city,
         country: strain.country,
+        referenceKinds: strain.genomeReferences.map((file: { kind: string }) => file.kind),
       })),
     },
     summary: getOrganismSummary(organism, tools),

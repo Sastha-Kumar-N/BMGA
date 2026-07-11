@@ -1,4 +1,9 @@
-import { CheckCircle2, Clock3, FileText, MessageSquareText, XCircle } from 'lucide-react';
+'use client';
+
+import { useState } from 'react';
+import { useSession } from 'next-auth/react';
+import { CheckCircle2, Clock3, Download, FileText, LoaderCircle, MessageSquareText, XCircle } from 'lucide-react';
+import { apiPath } from '../../lib/api-client';
 
 export type SubmissionStatus =
   | 'PENDING'
@@ -34,12 +39,18 @@ export type SubmissionReviewerNote = {
 
 export type SubmissionFile = {
   id: string;
+  kind?: string | null;
+  toolName?: string | null;
+  toolVersion?: string | null;
   fileName: string;
   fileType?: string | null;
   fileSizeBytes?: number | null;
   uploadedAt?: string | null;
   processingStatus?: string | null;
   checksum?: string | null;
+  errorMessage?: string | null;
+  ingestedAt?: string | null;
+  downloadPath?: string | null;
 };
 
 export function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
@@ -85,12 +96,17 @@ export function SubmissionTimeline({ history, title = 'Status History' }: { hist
   );
 }
 
-export function SubmissionFilesPanel({ files }: { files: SubmissionFile[] }) {
+export function SubmissionFilesPanel({ files, title = 'Uploaded Files', eyebrow = 'Submitted Assets', emptyMessage = 'No uploaded files are attached to this submission.' }: {
+  files: SubmissionFile[];
+  title?: string;
+  eyebrow?: string;
+  emptyMessage?: string;
+}) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-5 py-4">
-        <p className="text-[10px] font-black uppercase tracking-widest text-orange-500">Submitted Assets</p>
-        <h2 className="mt-1 text-xl font-black tracking-tight">Uploaded Files</h2>
+        <p className="text-[10px] font-black uppercase tracking-widest text-orange-500">{eyebrow}</p>
+        <h2 className="mt-1 text-xl font-black tracking-tight">{title}</h2>
       </div>
       <div className="divide-y divide-slate-100">
         {files.length ? files.map((file) => (
@@ -98,22 +114,60 @@ export function SubmissionFilesPanel({ files }: { files: SubmissionFile[] }) {
             <div className="min-w-0">
               <p className="truncate text-sm font-black text-[#0B1B3A]">{file.fileName}</p>
               <p className="mt-1 text-xs font-bold text-slate-500">
-                {file.fileType || 'N/A'} | {formatBytes(file.fileSizeBytes)} | {file.processingStatus || 'N/A'}
+                {file.kind ? `${file.kind} | ` : file.toolName ? `${file.toolName}${file.toolVersion ? ` ${file.toolVersion}` : ''} | ` : ''}{file.fileType || 'N/A'} | {formatBytes(file.fileSizeBytes)} | {file.processingStatus || 'N/A'}
               </p>
               {file.checksum && <p className="mt-1 break-all font-mono text-[11px] font-semibold text-slate-400">SHA256: {file.checksum}</p>}
+              {file.errorMessage && <p className="mt-2 text-xs font-bold text-red-700">{file.errorMessage}</p>}
             </div>
-            <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
-              <FileText size={14} /> {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : 'No date'}
-            </span>
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                <FileText size={14} /> {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : 'No date'}
+              </span>
+              {file.downloadPath && <SecureFileDownload file={file} />}
+            </div>
           </div>
         )) : (
           <div className="px-5 py-14 text-center">
             <FileText className="mx-auto text-slate-300" size={38} />
-            <p className="mt-3 text-sm font-bold text-slate-500">No uploaded files are attached to this submission.</p>
+            <p className="mt-3 text-sm font-bold text-slate-500">{emptyMessage}</p>
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+function SecureFileDownload({ file }: { file: SubmissionFile }) {
+  const { data: session } = useSession();
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  const download = async () => {
+    if (!file.downloadPath || !session?.user?.accessToken) return;
+    setState('loading');
+    try {
+      const response = await fetch(apiPath(file.downloadPath), {
+        headers: { Authorization: `Bearer ${session.user.accessToken}` },
+      });
+      if (!response.ok) throw new Error('Download failed');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = file.fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setState('idle');
+    } catch {
+      setState('error');
+    }
+  };
+
+  return (
+    <button type="button" onClick={download} disabled={state === 'loading' || !session?.user?.accessToken} title={state === 'error' ? 'Download failed. Try again.' : `Download ${file.fileName}`} className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 ${state === 'error' ? 'border-red-200 text-red-700' : 'border-teal-200 text-teal-700 hover:bg-teal-50'}`}>
+      {state === 'loading' ? <LoaderCircle className="animate-spin" size={14} /> : <Download size={14} />} {state === 'error' ? 'Retry' : 'Download'}
+    </button>
   );
 }
 

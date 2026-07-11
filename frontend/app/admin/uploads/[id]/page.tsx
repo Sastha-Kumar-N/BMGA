@@ -62,6 +62,12 @@ type OrganismUpload = {
   genomeSize?: number | null;
   gcContent?: string | number | null;
   repoLink?: string | null;
+  surveillanceScope?: string | null;
+  evidenceBasis?: string | null;
+  submittingInstitution?: string | null;
+  dataSource?: string | null;
+  dataUseLimitations?: string | null;
+  lastVerifiedAt?: string | null;
   metadata?: Record<string, unknown> | null;
   publishedOrganismId?: number | null;
   publishedStrainId?: number | null;
@@ -71,6 +77,7 @@ type OrganismUpload = {
   submittedBy?: Person | null;
   reviewedBy?: Person | null;
   files?: SubmissionFile[];
+  genomeReferences?: SubmissionFile[];
   statusHistory?: SubmissionHistoryEntry[];
   reviewerNotes?: SubmissionReviewerNote[];
 };
@@ -235,6 +242,11 @@ export default function AdminUploadDetailPage() {
                   <Info label="Taxonomy ID" value={upload.taxonomyId ? String(upload.taxonomyId) : 'Not provided'} />
                   <Info label="Submission Type" value={upload.submissionType || 'Organism Upload'} />
                   <Info label="Submission Title" value={upload.title || `${upload.scientificName} / ${upload.strainName}`} />
+                  <Info label="Surveillance Scope" value={upload.surveillanceScope?.replaceAll('_', ' ') || 'Not provided'} />
+                  <Info label="Evidence Basis" value={upload.evidenceBasis?.replaceAll('_', ' ') || 'Not provided'} />
+                  <Info label="Submitting Institution" value={upload.submittingInstitution || 'Not provided'} />
+                  <Info label="Data Source" value={upload.dataSource || 'Not provided'} />
+                  <Info label="Last Verified" value={upload.lastVerifiedAt ? new Date(upload.lastVerifiedAt).toLocaleString() : 'Not provided'} />
                 </div>
 
                 {upload.description && (
@@ -243,9 +255,16 @@ export default function AdminUploadDetailPage() {
                     <p className="mt-2 text-sm font-semibold leading-7 text-slate-700">{upload.description}</p>
                   </div>
                 )}
+                {upload.dataUseLimitations && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Data Use Limitations</p>
+                    <p className="mt-2 text-sm font-semibold leading-7 text-amber-950">{upload.dataUseLimitations}</p>
+                  </div>
+                )}
               </div>
 
               <SubmissionFilesPanel files={upload.files || []} />
+              <SubmissionFilesPanel files={upload.genomeReferences || []} title="Genome References" eyebrow="FASTA & Annotation Review" emptyMessage="No FASTA or GFF3 reference files are attached to this submission." />
               <SubmissionTimeline history={upload.statusHistory || []} />
               <AuditTimeline logs={detail.auditLogs} />
             </section>

@@ -216,3 +216,34 @@ docker compose up --build
 
 Frontend: http://localhost:3000  
 Backend: http://localhost:3001
+
+Apply database migrations after pulling schema changes:
+
+```bash
+docker compose --profile migrate run --rm --build migrate
+```
+
+## Genome workbench
+
+Approved strain references are available at:
+
+```text
+/organisms/:organismId/genome?strain=:strainId
+```
+
+The workspace embeds JBrowse 2 and IGV.js and provides authenticated NCBI BLAST+ searches against approved BMGA FASTA references. Submitters can attach plain-text FASTA (`.fa`, `.fna`, `.fasta`) and GFF3 (`.gff`, `.gff3`) files. The API validates and normalizes FASTA, generates the `.fai` index, verifies GFF3 structure and matching reference names, and publishes files only after admin approval.
+
+Local Docker stores reference objects in `backend_uploads`; production uses the configured private S3 bucket. BLAST indexes are generated from approved references into the `blast_data` volume and are rebuilt when reference checksums change.
+
+Key limits are configured through `MAX_GENOME_REFERENCE_BYTES`, `MAX_BLAST_QUERY_BASES`, `BLAST_RATE_LIMIT_MAX`, `BLAST_TIMEOUT_MS`, and `BLAST_MAX_CONCURRENT`.
+
+## FAIR and privacy
+
+- FAIR gateway: `/fair`
+- DCAT 3 / Bioschemas JSON-LD: `/api/backend/fair/catalog`
+- Per-strain JSON-LD: `/api/backend/fair/strains/:id`
+- OpenAPI: `/api/backend/openapi.json`
+- Cookie notice: `/cookies`
+- Privacy and data-use notice: `/privacy`
+
+Set `DATASET_LICENSE_NAME` and `DATASET_LICENSE_URL` before claiming reusable distribution terms. External FAIRsharing registration requires the organization owner's account; after acceptance, set `FAIRSHARING_RECORD_URL`. See `docs/FAIR_REGISTRATION.md`.

@@ -1,6 +1,18 @@
 import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
-import { ApprovalStatus, ContactMessageStatus, Prisma, PrismaClient, UserAffiliation, UserRole } from '@prisma/client';
+import {
+  ApprovalStatus,
+  ContactMessageStatus,
+  EvidenceBasis,
+  GenomeReferenceKind,
+  GenomeReferenceStatus,
+  Prisma,
+  PrismaClient,
+  SubmissionFileStatus,
+  SurveillanceScope,
+  UserAffiliation,
+  UserRole,
+} from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import cors from 'cors';
@@ -13,8 +25,27 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { createHash, randomUUID } from 'crypto';
 import { getOrganismById } from './services/organismService';
 import { getOrganismResults, getOrganismToolResult, getToolOutputFile, saveNormalizedToolRun } from './services/resultService';
-import { normalizeToolName } from './services/resultsParsers/toolDefinitions';
-import { configuredStorageDriver, deleteStoredFiles, saveUploadedResultFile, sendStoredFileDownload } from './services/objectStorage';
+import { normalizeToolName, TOOL_KEYS } from './services/resultsParsers/toolDefinitions';
+import {
+  configuredStorageDriver,
+  deleteStoredFiles,
+  readStoredTextFile,
+  saveGenomeReferenceFile,
+  saveSubmissionResultFile,
+  saveUploadedResultFile,
+  sendStoredFileDownload,
+  sendStoredFileInline,
+} from './services/objectStorage';
+import { prepareGenomeReference, type UploadableGenomeReferenceKind } from './services/genomeReferenceService';
+import { BlastServiceError, runBlastSearch } from './services/blastService';
+import {
+  getAmrSurveillanceInsights,
+  getSurveillanceFilterOptions,
+  getSurveillanceOverview,
+  getSurveillanceRecords,
+  syncAmrGenesFromToolRows,
+  type SurveillanceFilters,
+} from './services/surveillanceService';
 // --- Runtime Configuration --------------------------------------------------
 const isProduction = process.env.NODE_ENV === 'production';
 const allowInsecureDevSecrets = process.env.ALLOW_INSECURE_DEV_SECRETS === 'true';
@@ -23,8 +54,19 @@ const APP_VERSION = process.env.APP_VERSION || process.env.npm_package_version |
 const LOG_LEVEL = process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug');
 const ENABLE_REQUEST_LOGGING = process.env.ENABLE_REQUEST_LOGGING !== 'false';
 const PORT = Number(process.env.PORT || 3001);
-const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || '1mb';
+const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || '6mb';
+const GENOME_REFERENCE_BODY_LIMIT = process.env.GENOME_REFERENCE_BODY_LIMIT || '32mb';
 const MAX_IMPORT_FILE_BYTES = Number(process.env.MAX_IMPORT_FILE_BYTES || 5 * 1024 * 1024);
+const MAX_GENOME_REFERENCE_BYTES = Number(process.env.MAX_GENOME_REFERENCE_BYTES || 25 * 1024 * 1024);
+const MAX_BLAST_QUERY_BASES = numberEnv('MAX_BLAST_QUERY_BASES', 50_000);
+const BLAST_TIMEOUT_MS = numberEnv('BLAST_TIMEOUT_MS', 30_000);
+const BLAST_MAX_CONCURRENT = numberEnv('BLAST_MAX_CONCURRENT', 2);
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:3000').split(',')[0].trim().replace(/\/$/, '');
+const DATASET_CONTACT_EMAIL = normalizedEmail(process.env.DATASET_CONTACT_EMAIL || 'admin@bgdb.org');
+const DATASET_LICENSE_URL = (process.env.DATASET_LICENSE_URL || '').trim();
+const DATASET_LICENSE_NAME = (process.env.DATASET_LICENSE_NAME || '').trim();
+const FAIRSHARING_RECORD_URL = (process.env.FAIRSHARING_RECORD_URL || '').trim();
+const DATASET_DOI = (process.env.DATASET_DOI || '').trim();
 
 const TRUSTED_DEV_ORIGINS = [
   'http://localhost:3000',
@@ -184,6 +226,8 @@ function securityHeaders(req: Request, res: Response, next: NextFunction) {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
   res.setHeader('X-Request-ID', (req as AuthenticatedRequest).requestId || currentContext()?.requestId || randomUUID());
   if (isProduction) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -298,6 +342,18 @@ const importRateLimiter = rateLimit({
   windowMs: defaultRateLimitWindowMs,
   max: numberEnv('IMPORT_RATE_LIMIT_MAX', 40),
   key: (req) => `${getClientIp(req)}:${req.path}`,
+});
+const surveillanceRateLimiter = rateLimit({
+  name: 'surveillance',
+  windowMs: defaultRateLimitWindowMs,
+  max: numberEnv('SURVEILLANCE_RATE_LIMIT_MAX', 600),
+  key: (req) => `${getClientIp(req)}:${req.path}`,
+});
+const blastRateLimiter = rateLimit({
+  name: 'blast',
+  windowMs: defaultRateLimitWindowMs,
+  max: numberEnv('BLAST_RATE_LIMIT_MAX', 20),
+  key: (req) => `${getClientIp(req)}:${currentContext()?.userId || 'anonymous'}`,
 });
 
 async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -508,6 +564,47 @@ function parseAffiliation(value: unknown) {
     : UserAffiliation.RESEARCH;
 }
 
+function parseEvidenceBasis(value: unknown) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return Object.values(EvidenceBasis).includes(normalized as EvidenceBasis)
+    ? normalized as EvidenceBasis
+    : EvidenceBasis.GENOTYPIC;
+}
+
+function parseSurveillanceScope(value: unknown, country?: string) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (Object.values(SurveillanceScope).includes(normalized as SurveillanceScope)) {
+    return normalized as SurveillanceScope;
+  }
+  return country?.trim().toLowerCase() === 'india'
+    ? SurveillanceScope.NATIONAL
+    : SurveillanceScope.GLOBAL;
+}
+
+function parseSurveillanceFilters(query: Request['query']): SurveillanceFilters {
+  const organismId = parseOptionalInt(Array.isArray(query.organismId) ? query.organismId[0] : query.organismId);
+  const evidenceValue = textValue(Array.isArray(query.evidenceBasis) ? query.evidenceBasis[0] : query.evidenceBasis, 40)?.toUpperCase();
+  const scopeValue = textValue(Array.isArray(query.scope) ? query.scope[0] : query.scope, 40)?.toUpperCase();
+  const from = parseOptionalDate(Array.isArray(query.from) ? query.from[0] : query.from);
+  const rawTo = parseOptionalDate(Array.isArray(query.to) ? query.to[0] : query.to);
+  const to = rawTo ? new Date(rawTo.getTime() + 24 * 60 * 60 * 1_000 - 1) : undefined;
+
+  return {
+    search: textValue(Array.isArray(query.search) ? query.search[0] : query.search, 200),
+    organismId,
+    country: textValue(Array.isArray(query.country) ? query.country[0] : query.country, 120),
+    source: textValue(Array.isArray(query.source) ? query.source[0] : query.source, 160),
+    evidenceBasis: evidenceValue && Object.values(EvidenceBasis).includes(evidenceValue as EvidenceBasis)
+      ? evidenceValue as EvidenceBasis
+      : undefined,
+    scope: scopeValue && Object.values(SurveillanceScope).includes(scopeValue as SurveillanceScope)
+      ? scopeValue as SurveillanceScope
+      : undefined,
+    from,
+    to,
+  };
+}
+
 function validatePassword(password: unknown) {
   if (typeof password !== "string" || password.length < 10) {
     return "Password must be at least 10 characters long";
@@ -559,10 +656,18 @@ function buildOrganismUploadData(body: Record<string, unknown>) {
   if ((body.latitude !== undefined && body.latitude !== "" && latitude === undefined) || (body.longitude !== undefined && body.longitude !== "" && longitude === undefined)) {
     return { error: "Latitude and longitude must be valid decimal numbers" as const };
   }
+  if (latitude !== undefined && (latitude < -90 || latitude > 90)) {
+    return { error: "Latitude must be between -90 and 90" as const };
+  }
+  if (longitude !== undefined && (longitude < -180 || longitude > 180)) {
+    return { error: "Longitude must be between -180 and 180" as const };
+  }
 
   const taxonomyId = parseOptionalInt(body.taxonomyId);
   const genomeSize = parseOptionalInt(body.genomeSize);
   const gcContent = parseOptionalFloat(body.gcContent);
+
+  const country = textValue(body.country, 120) || "India";
 
   return {
     data: {
@@ -585,7 +690,7 @@ function buildOrganismUploadData(body: Record<string, unknown>) {
       assemblyAccession: textValue(body.assemblyAccession, 120),
       sourceType: textValue(body.sourceType, 160),
       host: textValue(body.host, 240),
-      country: textValue(body.country, 120) || "India",
+      country,
       state: textValue(body.state, 160),
       city: textValue(body.city, 160),
       collectionDate: parseOptionalDate(body.collectionDate),
@@ -597,6 +702,12 @@ function buildOrganismUploadData(body: Record<string, unknown>) {
       gcContent,
       repoLink: textValue(body.repoLink, 500),
       metadata: parseJsonObject(body.metadata) as Prisma.InputJsonValue,
+      surveillanceScope: parseSurveillanceScope(body.surveillanceScope, country),
+      evidenceBasis: parseEvidenceBasis(body.evidenceBasis),
+      submittingInstitution: textValue(body.submittingInstitution, 240),
+      dataSource: textValue(body.dataSource, 500),
+      dataUseLimitations: textValue(body.dataUseLimitations, 2000),
+      lastVerifiedAt: parseOptionalDate(body.lastVerifiedAt),
     },
   };
 }
@@ -650,6 +761,12 @@ function strainPublicationData(upload: {
   gcContent: Prisma.Decimal | null;
   repoLink: string | null;
   metadata: Prisma.JsonValue | null;
+  surveillanceScope: SurveillanceScope;
+  evidenceBasis: EvidenceBasis;
+  submittingInstitution: string | null;
+  dataSource: string | null;
+  dataUseLimitations: string | null;
+  lastVerifiedAt: Date | null;
 }) {
   return {
     strainName: upload.strainName,
@@ -672,6 +789,12 @@ function strainPublicationData(upload: {
     gcContent: upload.gcContent ?? undefined,
     repoLink: upload.repoLink || undefined,
     metadata: (upload.metadata || {}) as Prisma.InputJsonValue,
+    surveillanceScope: upload.surveillanceScope,
+    evidenceBasis: upload.evidenceBasis,
+    submittingInstitution: upload.submittingInstitution || undefined,
+    dataSource: upload.dataSource || undefined,
+    dataUseLimitations: upload.dataUseLimitations || undefined,
+    lastVerifiedAt: upload.lastVerifiedAt || undefined,
   };
 }
 
@@ -776,6 +899,40 @@ function submissionDetailInclude(includeInternalNotes: boolean) {
       orderBy: { createdAt: "asc" as const },
       include: {
         author: { select: SUBMISSION_PERSON_SELECT },
+      },
+    },
+    files: {
+      orderBy: { createdAt: "asc" as const },
+      select: {
+        id: true,
+        toolName: true,
+        originalFileName: true,
+        fileType: true,
+        fileSizeBytes: true,
+        checksumSha256: true,
+        toolVersion: true,
+        status: true,
+        errorMessage: true,
+        createdAt: true,
+        updatedAt: true,
+        ingestedAt: true,
+      },
+    },
+    genomeReferences: {
+      orderBy: { createdAt: "asc" as const },
+      select: {
+        id: true,
+        kind: true,
+        originalFileName: true,
+        contentType: true,
+        fileSizeBytes: true,
+        checksumSha256: true,
+        status: true,
+        isPublic: true,
+        validation: true,
+        createdAt: true,
+        updatedAt: true,
+        publishedAt: true,
       },
     },
   };
@@ -902,12 +1059,76 @@ function sanitizeSubmissionFiles(metadata: Prisma.JsonValue | null | undefined) 
     }));
 }
 
-function buildSubmissionResponse<T extends { metadata: Prisma.JsonValue | null; scientificName: string; strainName: string }>(upload: T) {
+function buildSubmissionResponse<T extends {
+  id: string;
+  metadata: Prisma.JsonValue | null;
+  scientificName: string;
+  strainName: string;
+  files?: Array<{
+    id: string;
+    toolName: string;
+    originalFileName: string;
+    fileType: string;
+    fileSizeBytes: number;
+    checksumSha256: string;
+    toolVersion: string | null;
+    status: SubmissionFileStatus;
+    errorMessage: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    ingestedAt: Date | null;
+  }>;
+  genomeReferences?: Array<{
+    id: string;
+    kind: GenomeReferenceKind;
+    originalFileName: string;
+    contentType: string;
+    fileSizeBytes: number;
+    checksumSha256: string;
+    status: GenomeReferenceStatus;
+    isPublic: boolean;
+    validation: Prisma.JsonValue | null;
+    createdAt: Date;
+    updatedAt: Date;
+    publishedAt: Date | null;
+  }>;
+}>(upload: T) {
+  const storedFiles = upload.files?.map((file) => ({
+    id: file.id,
+    toolName: file.toolName,
+    fileName: file.originalFileName,
+    fileType: file.fileType,
+    fileSizeBytes: file.fileSizeBytes,
+    checksum: file.checksumSha256,
+    toolVersion: file.toolVersion,
+    processingStatus: file.status,
+    errorMessage: file.errorMessage,
+    uploadedAt: file.createdAt,
+    updatedAt: file.updatedAt,
+    ingestedAt: file.ingestedAt,
+    downloadPath: `/submissions/${upload.id}/files/${file.id}/download`,
+  }));
+
   return {
     ...upload,
     submissionType: "Organism Upload",
     title: `${upload.scientificName} / ${upload.strainName}`,
-    files: sanitizeSubmissionFiles(upload.metadata),
+    files: storedFiles?.length ? storedFiles : sanitizeSubmissionFiles(upload.metadata),
+    genomeReferences: upload.genomeReferences?.map((file) => ({
+      id: file.id,
+      kind: file.kind,
+      fileName: file.originalFileName,
+      fileType: file.kind,
+      fileSizeBytes: file.fileSizeBytes,
+      checksum: file.checksumSha256,
+      processingStatus: file.status,
+      validation: file.validation,
+      uploadedAt: file.createdAt,
+      updatedAt: file.updatedAt,
+      publishedAt: file.publishedAt,
+      isPublic: file.isPublic,
+      downloadPath: `/submissions/${upload.id}/genome-references/${file.id}/download`,
+    })) || [],
   };
 }
 
@@ -952,6 +1173,209 @@ function parseDelimitedFile(fileContent: string, fileName: string) {
   return { columns, rows };
 }
 
+async function ingestSubmissionMayaFiles(submissionId: string, organismId: number, strainId: number) {
+  const files = await prisma.submissionFile.findMany({
+    where: {
+      submissionId,
+      status: { in: [SubmissionFileStatus.UPLOADED, SubmissionFileStatus.FAILED] },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  const result = { requested: files.length, ingested: 0, failed: 0, amrDetections: 0 };
+
+  for (const file of files) {
+    await prisma.submissionFile.update({
+      where: { id: file.id },
+      data: { status: SubmissionFileStatus.PROCESSING, errorMessage: null },
+    });
+
+    let publishedPath: string | undefined;
+    try {
+      const fileContent = await readStoredTextFile(file.storagePath, MAX_IMPORT_FILE_BYTES);
+      const checksum = createHash('sha256').update(fileContent, 'utf8').digest('hex');
+      if (checksum !== file.checksumSha256) throw new Error('Stored file checksum does not match the reviewed upload.');
+
+      const parsedTable = parseDelimitedFile(fileContent, file.originalFileName);
+      const errors = parseJsonArray(file.errors);
+      publishedPath = await saveUploadedResultFile({
+        organismId,
+        toolName: file.toolName,
+        fileName: file.originalFileName,
+        fileContent,
+      });
+      const savedRun = await saveNormalizedToolRun(prisma, organismId, strainId, {
+        toolName: file.toolName,
+        status: errors.length ? 'warning' : 'completed',
+        version: file.toolVersion || undefined,
+        finishedAt: new Date(),
+        summary: parseJsonObject(file.summary),
+        tables: parsedTable.columns.length ? [{
+          tableName: `${file.toolName} reviewed submission`,
+          columns: parsedTable.columns,
+          rows: parsedTable.rows,
+        }] : [],
+        files: [{
+          fileName: file.originalFileName,
+          fileType: file.fileType,
+          filePath: publishedPath,
+          description: `${file.toolName} result approved from submission ${submissionId}`,
+        }],
+        warnings: parseJsonArray(file.warnings),
+        errors,
+      });
+      const amrDetections = await syncAmrGenesFromToolRows(prisma, savedRun.id, strainId, normalizeToolName(file.toolName), parsedTable.rows);
+
+      await prisma.submissionFile.update({
+        where: { id: file.id },
+        data: {
+          status: SubmissionFileStatus.INGESTED,
+          errorMessage: null,
+          ingestedAt: new Date(),
+        },
+      });
+      result.ingested += 1;
+      result.amrDetections += amrDetections;
+    } catch (error) {
+      if (publishedPath) await deleteStoredFiles([publishedPath]);
+      result.failed += 1;
+      await prisma.submissionFile.update({
+        where: { id: file.id },
+        data: {
+          status: SubmissionFileStatus.FAILED,
+          errorMessage: sanitizeContactText(error instanceof Error ? error.message : 'Ingestion failed', 500),
+        },
+      });
+      logEvent('error', 'submission_maya_ingestion_failed', {
+        submissionId,
+        fileId: file.id,
+        toolName: file.toolName,
+        requestId: currentContext()?.requestId,
+        error: safeErrorMessage(error, 'Submission MAYA ingestion failed'),
+      });
+    }
+  }
+
+  return result;
+}
+
+function referenceNamesFromValidation(value: Prisma.JsonValue | null | undefined) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const names = (value as Record<string, unknown>).referenceNames;
+  return Array.isArray(names) ? names.filter((name): name is string => typeof name === 'string').slice(0, 500) : [];
+}
+
+function referenceSetsOverlap(left: string[], right: string[]) {
+  if (!left.length || !right.length) return true;
+  const names = new Set(left);
+  return right.some((name) => names.has(name));
+}
+
+async function savePreparedGenomeReferences(options: {
+  submissionId?: string;
+  strainId?: number;
+  files: Array<{
+    kind: 'FASTA' | 'FAI' | 'GFF3';
+    fileName: string;
+    contentType: string;
+    content: string;
+    validation: Record<string, unknown>;
+  }>;
+  publish: boolean;
+}) {
+  if ((!options.submissionId && !options.strainId) || (options.submissionId && options.strainId)) {
+    throw new Error('A genome reference must belong to exactly one submission or strain during upload.');
+  }
+
+  const kinds = options.files.map((file) => file.kind as GenomeReferenceKind);
+  const ownerWhere: Prisma.GenomeReferenceFileWhereInput = options.submissionId
+    ? { submissionId: options.submissionId, kind: { in: kinds } }
+    : { strainId: options.strainId, kind: { in: kinds } };
+  const previousFiles = await prisma.genomeReferenceFile.findMany({ where: ownerWhere, select: { id: true, storagePath: true } });
+  const storedFiles: Array<{ file: typeof options.files[number]; storagePath: string }> = [];
+
+  try {
+    for (const file of options.files) {
+      const storagePath = await saveGenomeReferenceFile({
+        ownerType: options.submissionId ? 'submission' : 'strain',
+        ownerId: options.submissionId || String(options.strainId),
+        kind: file.kind,
+        fileName: file.fileName,
+        fileContent: file.content,
+      });
+      storedFiles.push({ file, storagePath });
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      if (previousFiles.length) await tx.genomeReferenceFile.deleteMany({ where: { id: { in: previousFiles.map((file) => file.id) } } });
+      const results = [];
+      for (const stored of storedFiles) {
+        results.push(await tx.genomeReferenceFile.create({
+          data: {
+            submissionId: options.submissionId,
+            strainId: options.strainId,
+            kind: stored.file.kind as GenomeReferenceKind,
+            originalFileName: stored.file.fileName,
+            contentType: stored.file.contentType,
+            fileSizeBytes: Buffer.byteLength(stored.file.content, 'utf8'),
+            checksumSha256: createHash('sha256').update(stored.file.content, 'utf8').digest('hex'),
+            storagePath: stored.storagePath,
+            status: options.publish ? GenomeReferenceStatus.PUBLISHED : GenomeReferenceStatus.UPLOADED,
+            isPublic: options.publish,
+            validation: stored.file.validation as Prisma.InputJsonValue,
+            publishedAt: options.publish ? new Date() : undefined,
+          },
+          select: {
+            id: true,
+            kind: true,
+            originalFileName: true,
+            contentType: true,
+            fileSizeBytes: true,
+            checksumSha256: true,
+            status: true,
+            isPublic: true,
+            validation: true,
+            createdAt: true,
+            updatedAt: true,
+            publishedAt: true,
+          },
+        }));
+      }
+      return results;
+    });
+
+    if (previousFiles.length) await deleteStoredFiles(previousFiles.map((file) => file.storagePath));
+    return created;
+  } catch (error) {
+    if (storedFiles.length) await deleteStoredFiles(storedFiles.map((file) => file.storagePath));
+    throw error;
+  }
+}
+
+function publicReferenceFile(file: {
+  id: string;
+  kind: GenomeReferenceKind;
+  originalFileName: string;
+  contentType: string;
+  fileSizeBytes: number;
+  checksumSha256: string;
+  validation: Prisma.JsonValue | null;
+  updatedAt: Date;
+  publishedAt: Date | null;
+}, strainId: number) {
+  return {
+    id: file.id,
+    kind: file.kind,
+    fileName: file.originalFileName,
+    contentType: file.contentType,
+    fileSizeBytes: file.fileSizeBytes,
+    checksumSha256: file.checksumSha256,
+    validation: file.validation,
+    updatedAt: file.updatedAt,
+    publishedAt: file.publishedAt,
+    accessUrl: `/strains/${strainId}/genome-reference/files/${file.kind.toLowerCase()}`,
+  };
+}
+
 app.set('trust proxy', process.env.TRUST_PROXY || 1);
 app.use(requestContextMiddleware);
 app.use(securityHeaders);
@@ -963,7 +1387,15 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+const standardJsonParser = express.json({ limit: REQUEST_BODY_LIMIT });
+const genomeReferenceJsonParser = express.json({ limit: GENOME_REFERENCE_BODY_LIMIT });
+app.use((req, res, next) => {
+  const isGenomeReferenceUpload = req.method === 'POST' && (
+    /^\/api\/organism-uploads\/[^/]+\/genome-references$/.test(req.path)
+    || /^\/api\/admin\/strains\/\d+\/genome-references$/.test(req.path)
+  );
+  return (isGenomeReferenceUpload ? genomeReferenceJsonParser : standardJsonParser)(req, res, next);
+});
 app.use(requestLogger);
 
 app.get(['/health', '/api/health'], async (_req: Request, res: Response) => {
@@ -985,6 +1417,154 @@ app.get(['/version', '/api/version'], (_req: Request, res: Response) => {
     app: APP_NAME,
     version: APP_VERSION,
     environment: process.env.NODE_ENV || 'development',
+  });
+});
+
+app.get('/api/fair/status', async (_req: Request, res: Response) => {
+  try {
+    const [organisms, strains, referenceFiles, latestStrain] = await Promise.all([
+      prisma.organism.count(),
+      prisma.strain.count(),
+      prisma.genomeReferenceFile.count({ where: { status: GenomeReferenceStatus.PUBLISHED, isPublic: true } }),
+      prisma.strain.findFirst({ orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } }),
+    ]);
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({
+      title: 'Bharat Microbial Genome Atlas',
+      identifier: DATASET_DOI || `${PUBLIC_BASE_URL}/fair`,
+      counts: { organisms, strains, publishedReferenceFiles: referenceFiles },
+      modifiedAt: latestStrain?.updatedAt || null,
+      license: DATASET_LICENSE_URL ? { name: DATASET_LICENSE_NAME || 'Configured dataset license', url: DATASET_LICENSE_URL } : null,
+      registry: FAIRSHARING_RECORD_URL ? { name: 'FAIRsharing', url: FAIRSHARING_RECORD_URL, status: 'LINKED' } : { name: 'FAIRsharing', url: null, status: 'OWNER_ACTION_REQUIRED' },
+      contactEmail: DATASET_CONTACT_EMAIL,
+      machineMetadata: `${PUBLIC_BASE_URL}/api/backend/fair/catalog`,
+      openApi: `${PUBLIC_BASE_URL}/api/backend/openapi.json`,
+      fairClaim: 'FAIR-enabling metadata is provided. Formal FAIR assessment or registry acceptance is not implied.',
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load FAIR status' });
+  }
+});
+
+app.get('/api/fair/catalog', async (_req: Request, res: Response) => {
+  try {
+    const [organisms, strains, countries, latestStrain] = await Promise.all([
+      prisma.organism.count(),
+      prisma.strain.count(),
+      prisma.strain.findMany({ where: { country: { not: null } }, distinct: ['country'], select: { country: true } }),
+      prisma.strain.findFirst({ orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } }),
+    ]);
+    const dataset: Record<string, unknown> = {
+      '@type': ['dcat:Dataset', 'schema:Dataset'],
+      '@id': DATASET_DOI || `${PUBLIC_BASE_URL}/fair#dataset`,
+      'dcterms:title': 'Bharat Microbial Genome Atlas approved genomic surveillance dataset',
+      'dcterms:description': 'Reviewed microbial strain metadata, geographic provenance, MAYA pipeline summaries, AMR genotypic detections, and approved genome reference assets for India and global genomic surveillance.',
+      'dcterms:identifier': DATASET_DOI || `${PUBLIC_BASE_URL}/fair`,
+      'dcterms:publisher': { '@type': 'schema:Organization', name: 'Bharat Microbial Genome Atlas', url: PUBLIC_BASE_URL },
+      'dcterms:modified': latestStrain?.updatedAt?.toISOString() || null,
+      'dcterms:spatial': countries.map((entry) => entry.country).filter(Boolean),
+      'dcat:landingPage': `${PUBLIC_BASE_URL}/fair`,
+      'dcat:keyword': ['microbial genomics', 'genomic surveillance', 'AMR', 'MAYA pipeline', 'India', 'FASTA', 'GFF3'],
+      'dcat:theme': ['genomics', 'bioinformatics', 'public health surveillance'],
+      'dcterms:accessRights': 'Public metadata and administrator-approved genome reference files; account-controlled submission and compute services.',
+      'dcterms:conformsTo': ['https://www.w3.org/TR/vocab-dcat-3/', 'https://bioschemas.org/profiles/Dataset/1.0-RELEASE'],
+      'dcat:distribution': [
+        { '@type': 'dcat:Distribution', 'dcterms:title': 'Public organism registry API', 'dcat:accessURL': `${PUBLIC_BASE_URL}/api/backend/organisms`, 'dcat:mediaType': 'application/json' },
+        { '@type': 'dcat:Distribution', 'dcterms:title': 'Global surveillance records API', 'dcat:accessURL': `${PUBLIC_BASE_URL}/api/backend/surveillance/records`, 'dcat:mediaType': 'application/json' },
+        { '@type': 'dcat:DataService', 'dcterms:title': 'BMGA OpenAPI service description', 'dcat:endpointURL': `${PUBLIC_BASE_URL}/api/backend/openapi.json` },
+      ],
+      'schema:measurementTechnique': ['MAYA pipeline', 'NCBI BLAST+', 'reviewed genomic metadata ingestion'],
+      'schema:variableMeasured': ['organisms', 'strains', 'genotypic AMR detections', 'genome assemblies', 'geographic provenance'],
+      'schema:includedInDataCatalog': { '@id': `${PUBLIC_BASE_URL}/fair#catalog` },
+      'schema:size': `${organisms} organisms; ${strains} strains`,
+      'schema:conditionsOfAccess': 'Review data-source declarations, evidence basis, and per-record data-use limitations before reuse.',
+    };
+    if (DATASET_LICENSE_URL) {
+      dataset['dcterms:license'] = { '@id': DATASET_LICENSE_URL, name: DATASET_LICENSE_NAME || undefined };
+      dataset['schema:license'] = DATASET_LICENSE_URL;
+    }
+    if (DATASET_CONTACT_EMAIL) dataset['dcat:contactPoint'] = { '@type': 'vcard:Kind', 'vcard:hasEmail': `mailto:${DATASET_CONTACT_EMAIL}` };
+
+    const catalog = {
+      '@context': {
+        dcat: 'http://www.w3.org/ns/dcat#',
+        dcterms: 'http://purl.org/dc/terms/',
+        schema: 'https://schema.org/',
+        vcard: 'http://www.w3.org/2006/vcard/ns#',
+      },
+      '@type': 'dcat:Catalog',
+      '@id': `${PUBLIC_BASE_URL}/fair#catalog`,
+      'dcterms:title': 'Bharat Microbial Genome Atlas Data Catalog',
+      'dcterms:description': 'Machine-readable catalog for the BMGA genomic surveillance portal.',
+      'dcterms:publisher': { '@type': 'schema:Organization', name: 'Bharat Microbial Genome Atlas', url: PUBLIC_BASE_URL },
+      'dcat:dataset': dataset,
+    };
+    res.setHeader('Content-Type', 'application/ld+json; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    res.json(catalog);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to build FAIR catalog metadata' });
+  }
+});
+
+app.get('/api/fair/strains/:id', async (req: Request, res: Response) => {
+  const strainId = parseNumericParam(req.params.id);
+  if (!strainId) return res.status(400).json({ error: 'Invalid strain id' });
+  try {
+    const strain = await prisma.strain.findUnique({
+      where: { id: strainId },
+      include: {
+        organism: true,
+        genomeReferences: { where: { status: GenomeReferenceStatus.PUBLISHED, isPublic: true } },
+      },
+    });
+    if (!strain) return res.status(404).json({ error: 'Strain not found' });
+    const record: Record<string, unknown> = {
+      '@context': { schema: 'https://schema.org/', dcterms: 'http://purl.org/dc/terms/', dcat: 'http://www.w3.org/ns/dcat#', spdx: 'http://spdx.org/rdf/terms#' },
+      '@type': ['schema:Dataset', 'dcat:Dataset'],
+      '@id': `${PUBLIC_BASE_URL}/api/backend/fair/strains/${strain.id}`,
+      'dcterms:title': `${strain.organism.scientificName} ${strain.strainName} genomic record`,
+      'dcterms:identifier': strain.assemblyAccession || strain.biosampleAccession || `BMGA:strain:${strain.id}`,
+      'dcterms:modified': strain.updatedAt.toISOString(),
+      'dcterms:source': strain.dataSource || strain.repoLink || null,
+      'dcterms:spatial': [strain.city, strain.state, strain.country].filter(Boolean).join(', ') || null,
+      'schema:taxonomicRange': strain.organism.scientificName,
+      'schema:measurementTechnique': strain.evidenceBasis,
+      'schema:conditionsOfAccess': strain.dataUseLimitations || 'No additional record-specific limitation reported.',
+      'dcat:landingPage': `${PUBLIC_BASE_URL}/organisms/${strain.organismId}/genome?strain=${strain.id}`,
+      'dcat:distribution': strain.genomeReferences.map((file) => ({
+        '@type': 'dcat:Distribution',
+        'dcterms:title': file.originalFileName,
+        'dcterms:format': file.kind,
+        'dcat:downloadURL': `${PUBLIC_BASE_URL}/api/backend/strains/${strain.id}/genome-reference/files/${file.kind.toLowerCase()}`,
+        'dcat:byteSize': file.fileSizeBytes,
+        'spdx:checksum': { '@type': 'spdx:Checksum', 'spdx:algorithm': 'spdx:checksumAlgorithm_sha256', 'spdx:checksumValue': file.checksumSha256 },
+      })),
+    };
+    if (DATASET_LICENSE_URL) record['dcterms:license'] = DATASET_LICENSE_URL;
+    res.setHeader('Content-Type', 'application/ld+json; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    res.json(record);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to build FAIR strain metadata' });
+  }
+});
+
+app.get('/api/openapi.json', (_req: Request, res: Response) => {
+  res.json({
+    openapi: '3.1.0',
+    info: { title: 'Bharat Microbial Genome Atlas Public API', version: APP_VERSION, description: 'Public reviewed metadata and authenticated sequence-compute endpoints. Evidence limitations remain attached to each relevant response.' },
+    servers: [{ url: `${PUBLIC_BASE_URL}/api/backend` }],
+    paths: {
+      '/organisms': { get: { summary: 'List organisms', responses: { '200': { description: 'Approved organism records' } } } },
+      '/strains': { get: { summary: 'List strains', responses: { '200': { description: 'Approved strain records' } } } },
+      '/surveillance/overview': { get: { summary: 'Global surveillance overview', responses: { '200': { description: 'Live aggregate overview' } } } },
+      '/surveillance/records': { get: { summary: 'Filter global surveillance records', responses: { '200': { description: 'Paginated reviewed records' } } } },
+      '/organisms/{id}/genome-references': { get: { summary: 'List approved genome references', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { '200': { description: 'Per-strain FASTA/GFF3 catalog' } } } },
+      '/fair/catalog': { get: { summary: 'DCAT 3 and Bioschemas JSON-LD catalog', responses: { '200': { description: 'Machine-readable dataset catalog' } } } },
+      '/blast/search': { post: { summary: 'Authenticated NCBI BLAST+ search against approved BMGA references', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Genotypic sequence similarity results' }, '401': { description: 'Authentication required' }, '429': { description: 'Rate limit exceeded' } } } },
+    },
+    components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } } },
   });
 });
 
@@ -1200,6 +1780,288 @@ app.post('/api/organism-uploads', requireAuth, async (req: AuthenticatedRequest,
   }
 });
 
+app.post('/api/organism-uploads/:id/maya-files', importRateLimiter, requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const submissionId = parseStringParam(req.params.id);
+  let storedPath: string | undefined;
+
+  try {
+    const upload = await prisma.organismUpload.findUnique({
+      where: { id: submissionId },
+      select: {
+        id: true,
+        submittedById: true,
+        status: true,
+        _count: { select: { files: true } },
+      },
+    });
+    if (!upload) return res.status(404).json({ error: 'Organism upload not found' });
+
+    const isOwner = upload.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) {
+      await writeAdminLog(req.user?.userId, 'SUBMISSION_FILE_UPLOAD_DENIED', 'OrganismUpload', submissionId, {
+        result: 'failure',
+        statusCode: 403,
+      });
+      return res.status(403).json({ error: 'You are not allowed to add files to this submission' });
+    }
+    if (upload.status !== ApprovalStatus.PENDING && upload.status !== ApprovalStatus.NEEDS_CHANGES) {
+      return res.status(409).json({ error: 'MAYA files can only be added while a submission is pending or needs changes' });
+    }
+    if (upload._count.files >= 30) {
+      return res.status(409).json({ error: 'A submission can contain at most 30 MAYA result files' });
+    }
+
+    const normalizedTool = normalizeToolName(textValue(req.body?.toolName, 100) || '');
+    if (!TOOL_KEYS.includes(normalizedTool as typeof TOOL_KEYS[number])) {
+      return res.status(400).json({ error: 'Select a supported MAYA tool for this file' });
+    }
+    const existingToolFile = await prisma.submissionFile.findFirst({
+      where: { submissionId, toolName: normalizedTool },
+      select: { id: true },
+    });
+    if (existingToolFile) {
+      return res.status(409).json({ error: 'This submission already has a file for that MAYA tool. Remove it before uploading a replacement.' });
+    }
+    const validatedFile = validateImportFile(req.body?.fileName, req.body?.fileContent);
+    if ('error' in validatedFile) return res.status(400).json({ error: validatedFile.error });
+
+    const checksumSha256 = createHash('sha256').update(validatedFile.fileContent, 'utf8').digest('hex');
+    storedPath = await saveSubmissionResultFile({
+      submissionId,
+      toolName: normalizedTool,
+      fileName: validatedFile.fileName,
+      fileContent: validatedFile.fileContent,
+    });
+
+    const file = await prisma.submissionFile.create({
+      data: {
+        submissionId,
+        toolName: normalizedTool,
+        originalFileName: validatedFile.fileName,
+        fileType: path.extname(validatedFile.fileName).replace('.', '').toLowerCase() || 'txt',
+        fileSizeBytes: Buffer.byteLength(validatedFile.fileContent, 'utf8'),
+        checksumSha256,
+        storagePath: storedPath,
+        toolVersion: textValue(req.body?.toolVersion, 120),
+        summary: parseJsonObject(req.body?.summary) as Prisma.InputJsonValue,
+        warnings: parseJsonArray(req.body?.warnings) as Prisma.InputJsonValue,
+        errors: parseJsonArray(req.body?.errors) as Prisma.InputJsonValue,
+      },
+      select: {
+        id: true,
+        toolName: true,
+        originalFileName: true,
+        fileType: true,
+        fileSizeBytes: true,
+        checksumSha256: true,
+        toolVersion: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    await writeAdminLog(req.user?.userId, 'SUBMISSION_MAYA_FILE_UPLOADED', 'OrganismUpload', submissionId, {
+      fileId: file.id,
+      toolName: file.toolName,
+      fileName: file.originalFileName,
+      fileSizeBytes: file.fileSizeBytes,
+      storageDriver: configuredStorageDriver(),
+    });
+    res.status(201).json({ message: 'MAYA result file attached for admin review', file });
+  } catch (error) {
+    if (storedPath) await deleteStoredFiles([storedPath]);
+    logEvent('error', 'submission_file_upload_failed', {
+      submissionId,
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Submission file upload failed'),
+    });
+    res.status(500).json({ error: 'Failed to attach MAYA result file' });
+  }
+});
+
+app.get('/api/submissions/:submissionId/files/:fileId/download', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const submissionId = parseStringParam(req.params.submissionId);
+  const fileId = parseStringParam(req.params.fileId);
+
+  try {
+    const file = await prisma.submissionFile.findFirst({
+      where: { id: fileId, submissionId },
+      include: { submission: { select: { submittedById: true } } },
+    });
+    if (!file) return res.status(404).json({ error: 'Submission file not found' });
+
+    const isOwner = file.submission.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) {
+      await writeAdminLog(req.user?.userId, 'SUBMISSION_FILE_DOWNLOAD_DENIED', 'OrganismUpload', submissionId, {
+        result: 'failure',
+        fileId,
+        statusCode: 403,
+      });
+      return res.status(403).json({ error: 'You are not allowed to download this submission file' });
+    }
+
+    await writeAdminLog(req.user?.userId, 'SUBMISSION_FILE_DOWNLOADED', 'OrganismUpload', submissionId, {
+      fileId,
+      toolName: file.toolName,
+      result: 'success',
+    });
+    await sendStoredFileDownload(res, file.storagePath, file.originalFileName);
+  } catch (error) {
+    logEvent('error', 'submission_file_download_failed', {
+      submissionId,
+      fileId,
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Submission file download failed'),
+    });
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to download submission file' });
+  }
+});
+
+app.delete('/api/organism-uploads/:submissionId/maya-files/:fileId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const submissionId = parseStringParam(req.params.submissionId);
+  const fileId = parseStringParam(req.params.fileId);
+
+  try {
+    const file = await prisma.submissionFile.findFirst({
+      where: { id: fileId, submissionId },
+      include: { submission: { select: { submittedById: true, status: true } } },
+    });
+    if (!file) return res.status(404).json({ error: 'Submission file not found' });
+
+    const isOwner = file.submission.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'You are not allowed to remove this submission file' });
+    if (file.submission.status !== ApprovalStatus.PENDING && file.submission.status !== ApprovalStatus.NEEDS_CHANGES) {
+      return res.status(409).json({ error: 'Files cannot be removed after review is complete' });
+    }
+
+    const cleanup = await deleteStoredFiles([file.storagePath]);
+    if (cleanup.failed > 0) return res.status(503).json({ error: 'Stored file cleanup failed; the database record was preserved' });
+    await prisma.submissionFile.delete({ where: { id: file.id } });
+    await writeAdminLog(req.user?.userId, 'SUBMISSION_MAYA_FILE_REMOVED', 'OrganismUpload', submissionId, {
+      fileId,
+      toolName: file.toolName,
+    });
+    res.json({ message: 'MAYA result file removed' });
+  } catch (error) {
+    logEvent('error', 'submission_file_delete_failed', {
+      submissionId,
+      fileId,
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Submission file delete failed'),
+    });
+    res.status(500).json({ error: 'Failed to remove submission file' });
+  }
+});
+
+app.post('/api/organism-uploads/:id/genome-references', importRateLimiter, requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const submissionId = parseStringParam(req.params.id);
+  try {
+    const upload = await prisma.organismUpload.findUnique({
+      where: { id: submissionId },
+      select: {
+        id: true,
+        submittedById: true,
+        status: true,
+        genomeReferences: { select: { kind: true, validation: true } },
+      },
+    });
+    if (!upload) return res.status(404).json({ error: 'Organism upload not found' });
+    const isOwner = upload.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'You are not allowed to add genome references to this submission' });
+    if (upload.status !== ApprovalStatus.PENDING && upload.status !== ApprovalStatus.NEEDS_CHANGES) {
+      return res.status(409).json({ error: 'Genome references can only be changed while a submission is pending or needs changes' });
+    }
+
+    const kind = String(req.body?.kind || '').trim().toUpperCase() as UploadableGenomeReferenceKind;
+    if (kind !== 'FASTA' && kind !== 'GFF3') return res.status(400).json({ error: 'Reference kind must be FASTA or GFF3' });
+    const prepared = prepareGenomeReference({
+      kind,
+      fileName: req.body?.fileName,
+      fileContent: req.body?.fileContent,
+      maxBytes: MAX_GENOME_REFERENCE_BYTES,
+    });
+    if ('error' in prepared) return res.status(400).json({ error: prepared.error });
+
+    const otherKind = kind === 'FASTA' ? GenomeReferenceKind.GFF3 : GenomeReferenceKind.FASTA;
+    const other = upload.genomeReferences.find((file) => file.kind === otherKind);
+    const incomingNames = referenceNamesFromValidation(prepared.files[0].validation as Prisma.JsonValue);
+    if (other && !referenceSetsOverlap(incomingNames, referenceNamesFromValidation(other.validation))) {
+      return res.status(409).json({ error: 'FASTA and GFF3 reference names do not overlap. Confirm that both files describe the same assembly.' });
+    }
+
+    const files = await savePreparedGenomeReferences({ submissionId, files: prepared.files, publish: false });
+    await writeAdminLog(req.user?.userId, 'SUBMISSION_GENOME_REFERENCE_UPLOADED', 'OrganismUpload', submissionId, {
+      kinds: files.map((file) => file.kind),
+      fileNames: files.map((file) => file.originalFileName),
+      storageDriver: configuredStorageDriver(),
+    });
+    res.status(201).json({ message: `${kind} reference attached for admin review`, files });
+  } catch (error) {
+    logEvent('error', 'submission_genome_reference_upload_failed', {
+      submissionId,
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Genome reference upload failed'),
+    });
+    res.status(500).json({ error: 'Failed to attach genome reference' });
+  }
+});
+
+app.get('/api/submissions/:submissionId/genome-references/:fileId/download', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const submissionId = parseStringParam(req.params.submissionId);
+  const fileId = parseStringParam(req.params.fileId);
+  try {
+    const file = await prisma.genomeReferenceFile.findFirst({
+      where: { id: fileId, submissionId },
+      include: { submission: { select: { submittedById: true } } },
+    });
+    if (!file) return res.status(404).json({ error: 'Genome reference file not found' });
+    const isOwner = file.submission?.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'You are not allowed to download this genome reference' });
+    await writeAdminLog(req.user?.userId, 'SUBMISSION_GENOME_REFERENCE_DOWNLOADED', 'OrganismUpload', submissionId, {
+      fileId,
+      kind: file.kind,
+      result: 'success',
+    });
+    await sendStoredFileDownload(res, file.storagePath, file.originalFileName);
+  } catch (error) {
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to download genome reference' });
+  }
+});
+
+app.delete('/api/organism-uploads/:submissionId/genome-references/:fileId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const submissionId = parseStringParam(req.params.submissionId);
+  const fileId = parseStringParam(req.params.fileId);
+  try {
+    const file = await prisma.genomeReferenceFile.findFirst({
+      where: { id: fileId, submissionId },
+      include: { submission: { select: { submittedById: true, status: true } } },
+    });
+    if (!file) return res.status(404).json({ error: 'Genome reference file not found' });
+    const isOwner = file.submission?.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'You are not allowed to remove this genome reference' });
+    if (file.submission?.status !== ApprovalStatus.PENDING && file.submission?.status !== ApprovalStatus.NEEDS_CHANGES) {
+      return res.status(409).json({ error: 'Genome references cannot be removed after review is complete' });
+    }
+    const kinds = file.kind === GenomeReferenceKind.FASTA
+      ? [GenomeReferenceKind.FASTA, GenomeReferenceKind.FAI]
+      : [file.kind];
+    const files = await prisma.genomeReferenceFile.findMany({ where: { submissionId, kind: { in: kinds } } });
+    const cleanup = await deleteStoredFiles(files.map((item) => item.storagePath));
+    if (cleanup.failed) return res.status(503).json({ error: 'Stored file cleanup failed; database records were preserved' });
+    await prisma.genomeReferenceFile.deleteMany({ where: { id: { in: files.map((item) => item.id) } } });
+    await writeAdminLog(req.user?.userId, 'SUBMISSION_GENOME_REFERENCE_REMOVED', 'OrganismUpload', submissionId, { kinds });
+    res.json({ message: 'Genome reference removed' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove genome reference' });
+  }
+});
+
 app.get('/api/me/blog-posts', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const posts = await prisma.blogPost.findMany({
@@ -1293,6 +2155,68 @@ app.get('/api/dashboard/summary', async (req: Request, res: Response) => {
   }
 });
 
+app.use('/api/surveillance', surveillanceRateLimiter);
+
+app.get('/api/surveillance/overview', async (req: Request, res: Response) => {
+  try {
+    const overview = await getSurveillanceOverview(prisma, parseSurveillanceFilters(req.query));
+    res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=45');
+    res.json(overview);
+  } catch (error) {
+    logEvent('error', 'surveillance_overview_failed', {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Surveillance overview failed'),
+    });
+    res.status(500).json({ error: 'Failed to load global surveillance overview' });
+  }
+});
+
+app.get('/api/surveillance/filters', async (_req: Request, res: Response) => {
+  try {
+    const filters = await getSurveillanceFilterOptions(prisma);
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json(filters);
+  } catch (error) {
+    logEvent('error', 'surveillance_filters_failed', {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Surveillance filters failed'),
+    });
+    res.status(500).json({ error: 'Failed to load surveillance filter options' });
+  }
+});
+
+app.get('/api/surveillance/records', async (req: Request, res: Response) => {
+  try {
+    const requestedPage = parseOptionalInt(Array.isArray(req.query.page) ? req.query.page[0] : req.query.page) || 1;
+    const requestedPageSize = parseOptionalInt(Array.isArray(req.query.pageSize) ? req.query.pageSize[0] : req.query.pageSize) || 25;
+    const page = Math.max(1, requestedPage);
+    const pageSize = Math.min(100, Math.max(10, requestedPageSize));
+    const records = await getSurveillanceRecords(prisma, parseSurveillanceFilters(req.query), page, pageSize);
+    res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=45');
+    res.json(records);
+  } catch (error) {
+    logEvent('error', 'surveillance_records_failed', {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Surveillance records failed'),
+    });
+    res.status(500).json({ error: 'Failed to load surveillance records' });
+  }
+});
+
+app.get('/api/surveillance/amr', async (req: Request, res: Response) => {
+  try {
+    const insights = await getAmrSurveillanceInsights(prisma, parseSurveillanceFilters(req.query));
+    res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=45');
+    res.json(insights);
+  } catch (error) {
+    logEvent('error', 'surveillance_amr_failed', {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Surveillance AMR insights failed'),
+    });
+    res.status(500).json({ error: 'Failed to load AMR surveillance insights' });
+  }
+});
+
 // ─── GENOMICS & STRAIN ROUTES ────────────────────────────────────────────────
 
 app.get('/api/organisms', async (req: Request, res: Response) => {
@@ -1375,11 +2299,178 @@ app.get('/api/organisms/:id/downloads/:tool/:fileId', async (req: Request, res: 
 app.get('/api/strains', async (req: Request, res: Response) => {
   try {
     const strains = await prisma.strain.findMany({
-      include: { organism: true }
+      include: {
+        organism: true,
+        genomeReferences: {
+          where: { status: GenomeReferenceStatus.PUBLISHED, isPublic: true },
+          select: { kind: true },
+        },
+      }
     });
-    res.json(strains);
+    res.json(strains.map((strain) => ({
+      ...strain,
+      genomeReferences: undefined,
+      referenceKinds: strain.genomeReferences.map((file) => file.kind),
+    })));
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch strains" });
+  }
+});
+
+app.get('/api/organisms/:id/genome-references', async (req: Request, res: Response) => {
+  const organismId = parseNumericParam(req.params.id);
+  if (!organismId) return res.status(400).json({ error: 'Invalid organism id' });
+  try {
+    const organism = await prisma.organism.findUnique({
+      where: { id: organismId },
+      select: {
+        id: true,
+        scientificName: true,
+        displayName: true,
+        taxonomyId: true,
+        updatedAt: true,
+        strains: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            strainName: true,
+            isolateName: true,
+            assemblyAccession: true,
+            biosampleAccession: true,
+            genomeSize: true,
+            gcContent: true,
+            sourceType: true,
+            country: true,
+            state: true,
+            city: true,
+            evidenceBasis: true,
+            dataSource: true,
+            dataUseLimitations: true,
+            lastVerifiedAt: true,
+            updatedAt: true,
+            genomeReferences: {
+              where: { status: GenomeReferenceStatus.PUBLISHED, isPublic: true },
+              orderBy: { kind: 'asc' },
+              select: {
+                id: true,
+                kind: true,
+                originalFileName: true,
+                contentType: true,
+                fileSizeBytes: true,
+                checksumSha256: true,
+                validation: true,
+                updatedAt: true,
+                publishedAt: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!organism) return res.status(404).json({ error: 'Organism not found' });
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({
+      organism: {
+        id: organism.id,
+        scientificName: organism.scientificName,
+        displayName: organism.displayName,
+        taxonomyId: organism.taxonomyId,
+        updatedAt: organism.updatedAt,
+      },
+      strains: organism.strains.map((strain) => ({
+        ...strain,
+        gcContent: strain.gcContent === null ? null : Number(strain.gcContent),
+        references: strain.genomeReferences.map((file) => publicReferenceFile(file, strain.id)),
+        genomeReferences: undefined,
+      })),
+    });
+  } catch (error) {
+    logEvent('error', 'genome_reference_catalog_failed', { organismId, error: safeErrorMessage(error, 'Genome reference catalog failed') });
+    res.status(500).json({ error: 'Failed to load genome reference catalog' });
+  }
+});
+
+app.get('/api/strains/:id/genome-reference', async (req: Request, res: Response) => {
+  const strainId = parseNumericParam(req.params.id);
+  if (!strainId) return res.status(400).json({ error: 'Invalid strain id' });
+  try {
+    const strain = await prisma.strain.findUnique({
+      where: { id: strainId },
+      select: {
+        id: true,
+        organismId: true,
+        strainName: true,
+        assemblyAccession: true,
+        evidenceBasis: true,
+        updatedAt: true,
+        organism: { select: { scientificName: true, taxonomyId: true } },
+        genomeReferences: {
+          where: { status: GenomeReferenceStatus.PUBLISHED, isPublic: true },
+          orderBy: { kind: 'asc' },
+        },
+      },
+    });
+    if (!strain) return res.status(404).json({ error: 'Strain not found' });
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({
+      strain: { ...strain, genomeReferences: undefined },
+      references: strain.genomeReferences.map((file) => publicReferenceFile(file, strain.id)),
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load genome reference' });
+  }
+});
+
+app.get('/api/strains/:id/genome-reference/files/:kind', async (req: Request, res: Response) => {
+  const strainId = parseNumericParam(req.params.id);
+  const kind = parseStringParam(req.params.kind).toUpperCase() as GenomeReferenceKind;
+  if (!strainId || !Object.values(GenomeReferenceKind).includes(kind)) return res.status(400).json({ error: 'Invalid genome reference request' });
+  try {
+    const file = await prisma.genomeReferenceFile.findFirst({
+      where: { strainId, kind, status: GenomeReferenceStatus.PUBLISHED, isPublic: true },
+    });
+    if (!file) return res.status(404).json({ error: 'Published genome reference file not found' });
+    await sendStoredFileInline(req, res, file.storagePath, {
+      fileName: file.originalFileName,
+      contentType: file.contentType,
+      cacheControl: 'public, max-age=300, stale-while-revalidate=3600',
+    });
+  } catch (error) {
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to stream genome reference file' });
+  }
+});
+
+app.post('/api/blast/search', blastRateLimiter, requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const requestedStrainId = req.body?.strainId === undefined || req.body?.strainId === null || req.body?.strainId === ''
+    ? undefined
+    : Number(req.body.strainId);
+  if (requestedStrainId !== undefined && (!Number.isInteger(requestedStrainId) || requestedStrainId <= 0)) {
+    return res.status(400).json({ error: 'Invalid BLAST strain scope' });
+  }
+  try {
+    const result = await runBlastSearch(prisma, {
+      query: req.body?.query,
+      strainId: requestedStrainId,
+      maxReferenceBytes: MAX_GENOME_REFERENCE_BYTES,
+      maxQueryBases: MAX_BLAST_QUERY_BASES,
+      maxConcurrentSearches: BLAST_MAX_CONCURRENT,
+      timeoutMs: BLAST_TIMEOUT_MS,
+    });
+    await writeAdminLog(req.user?.userId, 'BLAST_SEARCH_COMPLETED', 'GenomeReference', requestedStrainId ? String(requestedStrainId) : 'all', {
+      result: 'success',
+      sequenceCount: result.query.sequenceCount,
+      totalBases: result.query.totalBases,
+      hitCount: result.hits.length,
+    });
+    res.json(result);
+  } catch (error) {
+    const statusCode = error instanceof BlastServiceError ? error.statusCode : 500;
+    await writeAdminLog(req.user?.userId, 'BLAST_SEARCH_FAILED', 'GenomeReference', requestedStrainId ? String(requestedStrainId) : 'all', {
+      result: 'failure',
+      statusCode,
+      reason: error instanceof BlastServiceError ? error.message : 'Search failed',
+    });
+    res.status(statusCode).json({ error: error instanceof BlastServiceError ? error.message : 'BLAST search failed' });
   }
 });
 
@@ -1387,6 +2478,40 @@ app.use('/api/admin', adminRateLimiter);
 
 app.get('/api/admin/me', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   res.json({ ok: true, user: req.user });
+});
+
+app.post('/api/admin/strains/:id/genome-references', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const strainId = parseNumericParam(req.params.id);
+  if (!strainId) return res.status(400).json({ error: 'Invalid strain id' });
+  try {
+    const strain = await prisma.strain.findUnique({
+      where: { id: strainId },
+      select: { id: true, strainName: true, genomeReferences: { select: { kind: true, validation: true } } },
+    });
+    if (!strain) return res.status(404).json({ error: 'Strain not found' });
+    const kind = String(req.body?.kind || '').trim().toUpperCase() as UploadableGenomeReferenceKind;
+    if (kind !== 'FASTA' && kind !== 'GFF3') return res.status(400).json({ error: 'Reference kind must be FASTA or GFF3' });
+    const prepared = prepareGenomeReference({ kind, fileName: req.body?.fileName, fileContent: req.body?.fileContent, maxBytes: MAX_GENOME_REFERENCE_BYTES });
+    if ('error' in prepared) return res.status(400).json({ error: prepared.error });
+    const otherKind = kind === 'FASTA' ? GenomeReferenceKind.GFF3 : GenomeReferenceKind.FASTA;
+    const other = strain.genomeReferences.find((file) => file.kind === otherKind);
+    if (other && !referenceSetsOverlap(
+      referenceNamesFromValidation(prepared.files[0].validation as Prisma.JsonValue),
+      referenceNamesFromValidation(other.validation),
+    )) {
+      return res.status(409).json({ error: 'FASTA and GFF3 reference names do not overlap. Confirm that both files describe the same assembly.' });
+    }
+    const files = await savePreparedGenomeReferences({ strainId, files: prepared.files, publish: true });
+    await writeAdminLog(req.user?.userId, 'ADMIN_GENOME_REFERENCE_PUBLISHED', 'Strain', String(strainId), {
+      strainName: strain.strainName,
+      kinds: files.map((file) => file.kind),
+      fileNames: files.map((file) => file.originalFileName),
+    });
+    res.status(201).json({ message: `${kind} reference validated and published`, files });
+  } catch (error) {
+    logEvent('error', 'admin_genome_reference_upload_failed', { strainId, error: safeErrorMessage(error, 'Genome reference upload failed') });
+    res.status(500).json({ error: 'Failed to publish genome reference' });
+  }
 });
 
 app.get('/api/admin/audit-logs', requireAdmin, async (req: Request, res: Response) => {
@@ -1741,12 +2866,43 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req: AuthenticatedReques
       return res.status(400).json({ error: "Type the user's email address or DELETE to confirm deletion" });
     }
 
-    await prisma.user.delete({ where: { id: targetUserId } });
+    const [submissionFiles, pendingGenomeReferences] = await Promise.all([
+      prisma.submissionFile.findMany({
+        where: { submission: { submittedById: targetUserId } },
+        select: { storagePath: true },
+      }),
+      prisma.genomeReferenceFile.findMany({
+        where: { submission: { submittedById: targetUserId }, strainId: null },
+        select: { id: true, storagePath: true },
+      }),
+    ]);
+    const cleanup = await deleteStoredFiles([
+      ...submissionFiles.map((file) => file.storagePath),
+      ...pendingGenomeReferences.map((file) => file.storagePath),
+    ]);
+    if (cleanup.failed > 0) {
+      await writeAdminLog(req.user?.userId, 'USER_DELETE_ATTEMPT', 'User', targetUserId, {
+        result: 'failure',
+        reason: 'storage_cleanup_failed',
+        targetEmail: targetUser.email,
+        cleanup,
+        statusCode: 503,
+      });
+      return res.status(503).json({ error: 'User submission file cleanup failed; the user record was preserved' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (pendingGenomeReferences.length) {
+        await tx.genomeReferenceFile.deleteMany({ where: { id: { in: pendingGenomeReferences.map((file) => file.id) } } });
+      }
+      await tx.user.delete({ where: { id: targetUserId } });
+    });
     await writeAdminLog(req.user?.userId, "USER_DELETED", "User", targetUserId, {
       targetEmail: targetUser.email,
       targetRole: targetUser.role,
       organismUploads: targetUser._count.organismUploads,
       blogPosts: targetUser._count.blogPosts,
+      cleanup,
     });
 
     res.json({ message: "User deleted", deletedUserId: targetUserId });
@@ -2037,6 +3193,46 @@ app.post('/api/admin/organism-uploads/:id/approve', requireAdmin, async (req: Au
         ? await tx.strain.update({ where: { id: existingStrain.id }, data: strainData })
         : await tx.strain.create({ data: { organismId: organism.id, ...strainData } });
 
+      const submittedReferences = await tx.genomeReferenceFile.findMany({
+        where: { submissionId: uploadId },
+        select: { id: true, kind: true, validation: true },
+      });
+      const submittedReferenceKinds = Array.from(new Set(submittedReferences.map((file) => file.kind)));
+      const currentStrainReferences = await tx.genomeReferenceFile.findMany({
+        where: { strainId: strain.id, kind: { in: [GenomeReferenceKind.FASTA, GenomeReferenceKind.GFF3] } },
+        select: { id: true, kind: true, validation: true },
+      });
+      const effectiveFasta = submittedReferences.find((file) => file.kind === GenomeReferenceKind.FASTA)
+        || currentStrainReferences.find((file) => file.kind === GenomeReferenceKind.FASTA);
+      const effectiveGff3 = submittedReferences.find((file) => file.kind === GenomeReferenceKind.GFF3)
+        || currentStrainReferences.find((file) => file.kind === GenomeReferenceKind.GFF3);
+      if (effectiveFasta && effectiveGff3 && !referenceSetsOverlap(
+        referenceNamesFromValidation(effectiveFasta.validation),
+        referenceNamesFromValidation(effectiveGff3.validation),
+      )) {
+        throw new Error('GENOME_REFERENCE_MISMATCH');
+      }
+      const replacedReferences = submittedReferenceKinds.length
+        ? await tx.genomeReferenceFile.findMany({
+          where: { strainId: strain.id, kind: { in: submittedReferenceKinds }, id: { notIn: submittedReferences.map((file) => file.id) } },
+          select: { id: true, storagePath: true },
+        })
+        : [];
+      if (replacedReferences.length) {
+        await tx.genomeReferenceFile.deleteMany({ where: { id: { in: replacedReferences.map((file) => file.id) } } });
+      }
+      if (submittedReferences.length) {
+        await tx.genomeReferenceFile.updateMany({
+          where: { id: { in: submittedReferences.map((file) => file.id) } },
+          data: {
+            strainId: strain.id,
+            status: GenomeReferenceStatus.PUBLISHED,
+            isPublic: true,
+            publishedAt: new Date(),
+          },
+        });
+      }
+
       const approvedUpload = await tx.organismUpload.update({
         where: { id: uploadId },
         data: {
@@ -2053,12 +3249,23 @@ app.post('/api/admin/organism-uploads/:id/approve', requireAdmin, async (req: Au
         },
       });
 
-      return { upload: approvedUpload, organism, strain };
+      return {
+        upload: approvedUpload,
+        organism,
+        strain,
+        genomeReferencesPublished: submittedReferences.length,
+        replacedReferencePaths: replacedReferences.map((file) => file.storagePath),
+      };
     });
+
+    if (result.replacedReferencePaths.length) await deleteStoredFiles(result.replacedReferencePaths);
+    const mayaIngestion = await ingestSubmissionMayaFiles(uploadId, result.organism.id, result.strain.id);
 
     await writeAdminLog(req.user?.userId, "ORGANISM_UPLOAD_APPROVED", "OrganismUpload", uploadId, {
       organismId: result.organism.id,
       strainId: result.strain.id,
+      genomeReferencesPublished: result.genomeReferencesPublished,
+      mayaIngestion,
     });
     await recordSubmissionStatusHistory({
       submissionId: uploadId,
@@ -2083,9 +3290,13 @@ app.post('/api/admin/organism-uploads/:id/approve', requireAdmin, async (req: Au
       });
     }
 
-    res.json({ message: "Organism upload approved and published", ...result });
+    const { replacedReferencePaths: _replacedReferencePaths, ...publicResult } = result;
+    res.json({ message: "Organism upload approved and published", ...publicResult, mayaIngestion });
   } catch (error) {
     console.error("Admin Upload Approval Error:", error);
+    if (error instanceof Error && error.message === 'GENOME_REFERENCE_MISMATCH') {
+      return res.status(409).json({ error: 'Approval blocked because the effective FASTA and GFF3 reference names do not overlap.' });
+    }
     res.status(500).json({ error: "Failed to approve organism upload" });
   }
 });
@@ -2135,8 +3346,34 @@ app.post('/api/admin/organism-uploads/:id/reject', requireAdmin, async (req: Aut
 app.delete('/api/admin/organism-uploads/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const uploadId = parseStringParam(req.params.id);
-    await prisma.organismUpload.delete({ where: { id: uploadId } });
-    await writeAdminLog(req.user?.userId, "ORGANISM_UPLOAD_DELETED", "OrganismUpload", uploadId);
+    const upload = await prisma.organismUpload.findUnique({
+      where: { id: uploadId },
+      include: {
+        files: { select: { storagePath: true } },
+        genomeReferences: { where: { strainId: null }, select: { id: true, storagePath: true } },
+      },
+    });
+    if (!upload) return res.status(404).json({ error: 'Organism upload not found' });
+
+    const cleanup = await deleteStoredFiles([
+      ...upload.files.map((file) => file.storagePath),
+      ...upload.genomeReferences.map((file) => file.storagePath),
+    ]);
+    if (cleanup.failed > 0) {
+      await writeAdminLog(req.user?.userId, 'ORGANISM_UPLOAD_DELETE_FAILED', 'OrganismUpload', uploadId, {
+        result: 'failure',
+        reason: 'storage_cleanup_failed',
+        cleanup,
+      });
+      return res.status(503).json({ error: 'Submission file cleanup failed; the submission record was preserved' });
+    }
+    await prisma.$transaction(async (tx) => {
+      if (upload.genomeReferences.length) {
+        await tx.genomeReferenceFile.deleteMany({ where: { id: { in: upload.genomeReferences.map((file) => file.id) } } });
+      }
+      await tx.organismUpload.delete({ where: { id: uploadId } });
+    });
+    await writeAdminLog(req.user?.userId, "ORGANISM_UPLOAD_DELETED", "OrganismUpload", uploadId, { cleanup });
     res.json({ message: "Organism upload deleted" });
   } catch (error) {
     console.error("Admin Upload Delete Error:", error);
@@ -2413,7 +3650,7 @@ app.delete('/api/admin/organisms/:id', requireAdmin, async (req: AuthenticatedRe
     }
 
     const strainIds = organism.strains.map((strain) => strain.id);
-    const [toolOutputFiles, fileAssets] = await Promise.all([
+    const [toolOutputFiles, fileAssets, genomeReferences] = await Promise.all([
       prisma.toolOutputFile.findMany({
         where: { toolRun: { organismId } },
         select: { filePath: true },
@@ -2429,10 +3666,15 @@ app.delete('/api/admin/organisms/:id', requireAdmin, async (req: AuthenticatedRe
         },
         select: { bucketName: true, objectKey: true },
       }),
+      prisma.genomeReferenceFile.findMany({
+        where: { strainId: { in: strainIds } },
+        select: { storagePath: true },
+      }),
     ]);
     const storedFilePaths = [
       ...toolOutputFiles.map((file) => file.filePath),
       ...fileAssets.map((file) => `s3://${file.bucketName}/${file.objectKey}`),
+      ...genomeReferences.map((file) => file.storagePath),
     ];
     const storageDeleteResult = await deleteStoredFiles(storedFilePaths);
     if (storageDeleteResult.failed > 0) {
@@ -2506,6 +3748,12 @@ app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: Request, 
       gcContent,
       repoLink,
       metadata,
+      surveillanceScope,
+      evidenceBasis,
+      submittingInstitution,
+      dataSource,
+      dataUseLimitations,
+      lastVerifiedAt,
     } = req.body;
 
     const updated = await prisma.strain.update({
@@ -2531,6 +3779,12 @@ app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: Request, 
         gcContent: gcContent !== undefined && gcContent !== "" ? Number(gcContent) : undefined,
         repoLink,
         metadata: parseJsonObject(metadata) as Prisma.InputJsonValue,
+        surveillanceScope: parseSurveillanceScope(surveillanceScope, country),
+        evidenceBasis: parseEvidenceBasis(evidenceBasis),
+        submittingInstitution: textValue(submittingInstitution, 240),
+        dataSource: textValue(dataSource, 500),
+        dataUseLimitations: textValue(dataUseLimitations, 2000),
+        lastVerifiedAt: parseOptionalDate(lastVerifiedAt),
       },
     });
     res.json(updated);
@@ -2595,6 +3849,13 @@ app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req:
       warnings: parseJsonArray(warnings),
       errors: parseJsonArray(errors),
     });
+    const amrDetections = await syncAmrGenesFromToolRows(
+      prisma,
+      savedRun.id,
+      numericStrainId,
+      normalizeToolName(toolName),
+      parsedTable.rows,
+    );
 
     await writeAdminLog(req.user?.userId, "MAYA_RESULT_IMPORTED", "ToolRun", String(savedRun.id), {
       organismId: numericOrganismId,
@@ -2602,8 +3863,9 @@ app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req:
       toolName: normalizeToolName(toolName),
       fileName: validatedFile?.fileName,
       storageDriver: savedFilePath ? configuredStorageDriver() : undefined,
+      amrDetections,
     });
-    res.status(201).json({ message: "MAYA result ingested", toolRunId: savedRun.id });
+    res.status(201).json({ message: "MAYA result ingested", toolRunId: savedRun.id, amrDetections });
   } catch (error) {
     console.error("MAYA Result Ingestion Error:", error);
     res.status(500).json({ error: "Failed to ingest MAYA result" });
@@ -2780,6 +4042,12 @@ app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Request, re
       gcContent,
       repoLink,
       metadata,
+      surveillanceScope,
+      evidenceBasis,
+      submittingInstitution,
+      dataSource,
+      dataUseLimitations,
+      lastVerifiedAt,
     } = req.body;
     
     const newStrain = await prisma.strain.create({
@@ -2805,6 +4073,12 @@ app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Request, re
         gcContent: gcContent !== undefined && gcContent !== "" ? Number(gcContent) : undefined,
         repoLink,
         metadata: parseJsonObject(metadata) as Prisma.InputJsonValue,
+        surveillanceScope: parseSurveillanceScope(surveillanceScope, country),
+        evidenceBasis: parseEvidenceBasis(evidenceBasis),
+        submittingInstitution: textValue(submittingInstitution, 240),
+        dataSource: textValue(dataSource, 500),
+        dataUseLimitations: textValue(dataUseLimitations, 2000),
+        lastVerifiedAt: parseOptionalDate(lastVerifiedAt),
       }
     });
     
@@ -2820,7 +4094,14 @@ app.use((req: Request, res: Response) => {
 });
 
 app.use((error: Error, req: Request, res: Response, _next: NextFunction) => {
-  const statusCode = error.message === 'CORS origin not allowed' ? 403 : 500;
+  const requestError = error as Error & { status?: number; type?: string };
+  const statusCode = error.message === 'CORS origin not allowed'
+    ? 403
+    : requestError.type === 'entity.too.large' || requestError.status === 413
+      ? 413
+      : requestError.type === 'entity.parse.failed' || requestError.status === 400
+        ? 400
+        : 500;
   logEvent(statusCode >= 500 ? 'error' : 'warn', 'request_error', {
     requestId: currentContext()?.requestId,
     method: req.method,
@@ -2831,7 +4112,7 @@ app.use((error: Error, req: Request, res: Response, _next: NextFunction) => {
   });
 
   res.status(statusCode).json({
-    error: statusCode === 403 ? "Forbidden" : "Request failed",
+    error: statusCode === 403 ? 'Forbidden' : statusCode === 413 ? 'Request body is too large' : statusCode === 400 ? 'Invalid JSON request body' : 'Request failed',
     requestId: currentContext()?.requestId,
   });
 });

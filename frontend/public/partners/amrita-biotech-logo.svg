@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">Amrita School of Biotechnology logo placeholder</title>
+  <desc id="desc">Placeholder logo for Amrita School of Biotechnology.</desc>
+  <rect width="320" height="320" rx="44" fill="#fff7ed"/>
+  <circle cx="160" cy="120" r="58" fill="#0b1b3a"/>
+  <path d="M126 140c22-44 46-44 68 0m-68 40c22-44 46-44 68 0" fill="none" stroke="#ff6b00" stroke-width="12" stroke-linecap="round"/>
+  <path d="M132 145h56M132 175h56" stroke="#06b6d4" stroke-width="8" stroke-linecap="round"/>
+  <text x="160" y="224" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="800" fill="#0b1b3a">AMRITA</text>
+  <text x="160" y="252" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="800" letter-spacing="2" fill="#f97316">BIOTECH</text>
+</svg>
