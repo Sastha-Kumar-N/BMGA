@@ -9,7 +9,7 @@ import { evidenceLabel, formatDate, type SurveillanceLocation } from './types';
 const WORLD_CENTER: [number, number] = [18, 8];
 const WORLD_BOUNDS: LatLngBoundsExpression = [[-62, -178], [78, 178]];
 const WORLD_TILE_OPTIONS = { noWrap: true };
-const WORLD_MAP_OPTIONS = { maxBounds: [[-90, -180], [90, 180]], maxBoundsViscosity: 1 };
+const WORLD_MAP_OPTIONS = { maxBounds: [[-90, -180], [90, 180]] as LatLngBoundsExpression, maxBoundsViscosity: 1 };
 
 function MapViewport({ locations }: { locations: SurveillanceLocation[] }) {
   const map = useMap();

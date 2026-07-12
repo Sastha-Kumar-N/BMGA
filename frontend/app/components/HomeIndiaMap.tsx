@@ -125,7 +125,7 @@ export default function HomeIndiaMap({ strains, loading = false, error = null }:
   ), [strains]);
 
   return (
-    <div className="relative h-full min-h-[420px] overflow-hidden rounded-[2rem] border border-cyan-300/10 bg-[#06152E] shadow-2xl shadow-cyan-950/40 lg:min-h-[560px]">
+    <div className="relative h-full min-h-[420px] overflow-hidden rounded-lg border border-cyan-300/10 bg-[#06152E] shadow-xl shadow-cyan-950/20 lg:min-h-[560px]">
       <MapContainer
         center={INDIA_CENTER}
         zoom={5}
@@ -188,7 +188,7 @@ export default function HomeIndiaMap({ strains, loading = false, error = null }:
       </div>
 
       {(loading || error || points.length === 0) && (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-[550] w-[min(360px,calc(100%-40px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/15 bg-[#071833]/90 p-6 text-center text-white shadow-2xl backdrop-blur">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-[550] w-[min(360px,calc(100%-40px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/15 bg-[#071833]/90 p-6 text-center text-white shadow-2xl backdrop-blur">
           {loading ? (
             <>
               <RefreshCcw className="mx-auto mb-4 animate-spin text-orange-300" size={34} />

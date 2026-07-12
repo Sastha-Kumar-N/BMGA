@@ -25,10 +25,42 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+:focus-visible {
+  outline-color: #f97316;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 .bmga-leaflet-map {
   background: #74d3e2;
 }
 
 .bmga-home-map {
   background: #74d3e2;
+}
+
+.bmga-world-hero-map {
+  background: #06152e;
+}
+
+.bmga-world-hero-map .leaflet-tile-pane {
+  filter: brightness(0.58) saturate(0.72) sepia(0.12) hue-rotate(158deg);
+}
+
+.bmga-world-hero-map .leaflet-control-attribution {
+  background: rgba(4, 17, 38, 0.78);
+  color: #94a3b8;
+  font-size: 9px;
+}
+
+.bmga-world-hero-map .leaflet-control-attribution a {
+  color: #99f6e4;
 }

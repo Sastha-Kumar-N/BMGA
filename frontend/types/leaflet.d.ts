@@ -20,9 +20,13 @@ declare module "leaflet" {
     zoom?: number;
     minZoom?: number;
     maxZoom?: number;
+    zoomSnap?: number;
+    zoomDelta?: number;
     zoomControl?: boolean;
     attributionControl?: boolean;
     scrollWheelZoom?: boolean;
+    maxBounds?: LatLngBoundsExpression;
+    maxBoundsViscosity?: number;
   }
 
   export interface LayerOptions {
@@ -37,12 +41,14 @@ declare module "leaflet" {
   export interface GridLayerOptions extends LayerOptions {
     opacity?: number;
     zIndex?: number;
+    bounds?: LatLngBoundsExpression;
   }
 
   export interface TileLayerOptions extends GridLayerOptions {
     attribution?: string;
     maxZoom?: number;
     minZoom?: number;
+    noWrap?: boolean;
   }
 
   export interface WMSOptions extends TileLayerOptions {
@@ -156,8 +162,10 @@ declare module "leaflet" {
 
   export class Map extends Evented {
     constructor(element: HTMLElement, options?: MapOptions);
-    setView(center: LatLngExpression, zoom?: number): this;
+    setView(center: LatLngExpression, zoom?: number, options?: { animate?: boolean }): this;
     fitBounds(bounds: LatLngBoundsExpression, options?: FitBoundsOptions): this;
+    getSize(): { x: number; y: number };
+    invalidateSize(options?: { animate?: boolean }): this;
     remove(): this;
   }
 
