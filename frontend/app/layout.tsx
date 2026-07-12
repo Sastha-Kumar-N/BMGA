@@ -3,6 +3,7 @@ import "leaflet/dist/leaflet.css";
 import "./globals.css";
 import AuthProvider from "./context/AuthProvider";
 import CookieNotice from "./components/CookieNotice";
+import UniversalNavigationGate from "./components/navigation/UniversalNavigationGate";
 import { BRAND_FULL_NAME } from "./lib/brand";
 
 // Metadata stays here on the Server side
@@ -24,6 +25,7 @@ export default function RootLayout({
       <body className="antialiased">
         {/* We use a separate AuthProvider to keep this file as a Server Component */}
         <AuthProvider>
+          <UniversalNavigationGate />
           {children}
           <CookieNotice />
         </AuthProvider>

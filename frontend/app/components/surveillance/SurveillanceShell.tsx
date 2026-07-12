@@ -14,6 +14,8 @@ import {
   LogOut,
   Menu,
   Microscope,
+  PanelLeftClose,
+  PanelLeftOpen,
   ShieldAlert,
   UploadCloud,
   X,
@@ -42,6 +44,7 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
   const pathname = usePathname();
   const { data: session } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#f6f8fb] text-[#0B1B3A]">
@@ -97,10 +100,19 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-[1600px] 2xl:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="hidden min-h-[calc(100vh-4rem)] border-r border-white/10 bg-[#07172f] p-4 text-white 2xl:block">
+      <div className={`mx-auto grid w-full max-w-[1600px] transition-[grid-template-columns] duration-200 ${desktopCollapsed ? '2xl:grid-cols-[76px_minmax(0,1fr)]' : '2xl:grid-cols-[240px_minmax(0,1fr)]'}`}>
+        <aside className={`hidden min-h-[calc(100vh-4rem)] border-r border-white/10 bg-[#07172f] text-white 2xl:block ${desktopCollapsed ? 'p-2' : 'p-4'}`}>
           <div className="sticky top-20">
-            <SurveillanceNavigation pathname={pathname} onNavigate={() => undefined} />
+            <button
+              type="button"
+              onClick={() => setDesktopCollapsed((current) => !current)}
+              aria-label={desktopCollapsed ? 'Expand surveillance sidebar' : 'Collapse surveillance sidebar'}
+              aria-expanded={!desktopCollapsed}
+              className={`mb-3 inline-flex h-10 items-center justify-center border border-white/10 text-slate-300 transition hover:border-teal-400 hover:text-white ${desktopCollapsed ? 'w-full' : 'w-10'}`}
+            >
+              {desktopCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
+            <SurveillanceNavigation pathname={pathname} onNavigate={() => undefined} compact={desktopCollapsed} />
           </div>
         </aside>
         <main id="surveillance-main" className="min-w-0 max-w-full overflow-hidden px-4 py-6 sm:px-6 lg:px-8">
@@ -118,7 +130,7 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
                 <X size={20} />
               </button>
             </div>
-            <SurveillanceNavigation pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+            <SurveillanceNavigation pathname={pathname} onNavigate={() => setMobileOpen(false)} compact={false} />
             <div className="mt-5 border-t border-white/10 pt-4">
               {portalLinks.map((link) => (
                 <Link key={link.label} href={link.href} onClick={() => setMobileOpen(false)} className="block rounded-md px-3 py-3 text-sm font-bold text-slate-300 hover:bg-white/5 hover:text-white">
@@ -140,15 +152,15 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
   );
 }
 
-function SurveillanceNavigation({ pathname, onNavigate }: { pathname: string; onNavigate: () => void }) {
+function SurveillanceNavigation({ pathname, onNavigate, compact = false }: { pathname: string; onNavigate: () => void; compact?: boolean }) {
   return (
     <nav aria-label="Global surveillance navigation">
-      <div className="mb-5 flex items-center gap-3 px-2 text-teal-300">
+      <div className={`mb-5 flex items-center text-teal-300 ${compact ? 'justify-center px-0' : 'gap-3 px-2'}`}>
         <span className="flex h-10 w-10 items-center justify-center rounded-md bg-teal-500/10"><Dna size={20} /></span>
-        <div>
+        {!compact && <div>
           <p className="text-[10px] font-black uppercase tracking-widest">BMGA Surveillance</p>
           <p className="text-xs font-semibold text-slate-400">Global genomic signals</p>
-        </div>
+        </div>}
       </div>
       <div className="space-y-1">
         {sectionLinks.map((link) => {
@@ -165,17 +177,19 @@ function SurveillanceNavigation({ pathname, onNavigate }: { pathname: string; on
               href={link.href}
               onClick={onNavigate}
               aria-current={active ? 'page' : undefined}
-              className={`flex min-h-11 items-center gap-3 rounded-md border-l-4 px-3 py-2.5 text-sm font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300 ${active ? 'border-teal-400 bg-teal-500/15 text-white' : 'border-transparent text-slate-300 hover:bg-white/5 hover:text-white'}`}
+              aria-label={compact ? link.label : undefined}
+              title={compact ? link.label : undefined}
+              className={`flex min-h-11 items-center rounded-md border-l-4 py-2.5 text-sm font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300 ${compact ? 'justify-center px-0' : 'gap-3 px-3'} ${active ? 'border-teal-400 bg-teal-500/15 text-white' : 'border-transparent text-slate-300 hover:bg-white/5 hover:text-white'}`}
             >
-              <Icon size={18} /> {link.label}
+              <Icon size={18} /> <span className={compact ? 'sr-only' : ''}>{link.label}</span>
             </Link>
           );
         })}
       </div>
-      <div className="mt-8 rounded-md border border-white/10 p-4">
+      {!compact && <div className="mt-8 rounded-md border border-white/10 p-4">
         <div className="flex items-center gap-2 text-xs font-black text-white"><Microscope size={16} className="text-teal-300" /> Evidence note</div>
         <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">Pipeline detections are genotypic evidence unless linked phenotypic testing is explicitly recorded.</p>
-      </div>
+      </div>}
     </nav>
   );
 }

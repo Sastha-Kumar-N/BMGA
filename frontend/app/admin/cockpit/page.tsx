@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertCircle, BookOpenCheck, ClipboardCheck, Database, Globe2, History, Home, Inbox, LayoutDashboard, Search, ShieldCheck, Trash2, UsersRound } from 'lucide-react';
+import { AlertCircle, ArrowRight, BookOpenCheck, ClipboardCheck, Database, FileCheck2, Globe2, History, Inbox, MessageSquare, Plus, Search, ShieldCheck, Trash2, UserCog, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
@@ -157,6 +157,71 @@ export default function AdminCockpitPage() {
     const organismStrains = strains.filter((strain) => strain.organismId === organism.id);
     return searchable(`${organism.scientificName} ${organism.displayName || ''} ${organismStrains.map((strain) => `${strain.strainName} ${strain.sourceType || ''}`).join(' ')}`, organismSearch);
   }).slice(0, 8);
+  const operationGroups: Array<{
+    title: string;
+    description: string;
+    icon: LucideIcon;
+    tone: string;
+    actions: Array<{ href: string; title: string; body: string; icon: LucideIcon }>;
+  }> = [
+    {
+      title: 'Data Ingestion',
+      description: 'Create organism records and process submitted datasets.',
+      icon: Database,
+      tone: 'text-teal-700 bg-teal-50',
+      actions: [
+        { href: '/admin', title: 'Add Organism', body: 'Open the organism and MAYA ingestion portal.', icon: Plus },
+        { href: '/admin/uploads', title: 'Review Uploads', body: `${pendingUploads} submissions awaiting review.`, icon: ClipboardCheck },
+      ],
+    },
+    {
+      title: 'Content Review',
+      description: 'Verify organism submissions and approve scientific writing.',
+      icon: FileCheck2,
+      tone: 'text-orange-700 bg-orange-50',
+      actions: [
+        { href: '/admin/uploads', title: 'Organism Review', body: 'Approve, reject, edit, or request changes.', icon: ClipboardCheck },
+        { href: '/admin/blogs', title: 'Blog Review', body: `${pendingPosts} posts awaiting approval.`, icon: BookOpenCheck },
+      ],
+    },
+    {
+      title: 'People & Access',
+      description: 'Manage accounts, roles, and contributor privileges.',
+      icon: UserCog,
+      tone: 'text-blue-700 bg-blue-50',
+      actions: [
+        { href: '/admin/users', title: 'Registered Users', body: `${userCount} accounts in the portal.`, icon: UsersRound },
+      ],
+    },
+    {
+      title: 'Communications',
+      description: 'Review collaboration requests and public enquiries.',
+      icon: MessageSquare,
+      tone: 'text-teal-700 bg-teal-50',
+      actions: [
+        { href: '/admin/contact-messages', title: 'Contact Messages', body: `${unreadMessages} unread messages.`, icon: Inbox },
+      ],
+    },
+    {
+      title: 'Audit & Security',
+      description: 'Inspect administrative activity and authorization events.',
+      icon: ShieldCheck,
+      tone: 'text-slate-700 bg-slate-100',
+      actions: [
+        { href: '/admin/audit-logs', title: 'Audit Logs', body: `${auditEvents} recorded events.`, icon: History },
+      ],
+    },
+    {
+      title: 'Surveillance Views',
+      description: 'Inspect the public outputs produced from approved data.',
+      icon: Globe2,
+      tone: 'text-emerald-700 bg-emerald-50',
+      actions: [
+        { href: '/surveillance', title: 'Global Surveillance', body: 'Open worldwide genomic signals and AMR insights.', icon: Globe2 },
+        { href: '/dashboard', title: 'India Dashboard', body: 'Open the national atlas and organism registry.', icon: Database },
+      ],
+    },
+  ];
 
   const runDelete = async () => {
     if (!deleteDialog) return;
@@ -179,34 +244,31 @@ export default function AdminCockpitPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f6f8fb] px-5 py-8 text-[#0B1B3A] md:px-8">
-      <div className="mx-auto max-w-7xl space-y-7">
-        <header className="rounded-3xl bg-[#0B1B3A] p-7 text-white shadow-xl md:p-9">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+    <main className="min-h-screen bg-[#f6f8fb] px-4 py-7 text-[#0B1B3A] sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1400px] space-y-6">
+        <header className="border border-slate-200 bg-white shadow-sm">
+          <div className="grid gap-6 border-l-4 border-orange-500 p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:p-8">
             <div>
-              <Link href="/admin" className="text-xs font-black uppercase tracking-widest text-orange-300">MAYA Ingestion Portal</Link>
-              <h1 className="mt-3 flex items-center gap-3 text-4xl font-black tracking-tight">
-                <ShieldCheck className="text-orange-400" size={36} /> Admin Cockpit
+              <p className="text-xs font-black uppercase text-orange-600">Private administration</p>
+              <h1 className="mt-2 flex items-center gap-3 text-3xl font-black sm:text-4xl">
+                <ShieldCheck className="text-orange-500" size={32} /> Admin Cockpit
               </h1>
-              <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-300">
-                Manage registered users, role privileges, organism submissions, blog approval workflows, and contact messages from one private dashboard.
+              <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
+                Manage data ingestion, user access, scientific review workflows, communications, and security activity from one private workspace.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Link href="/" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:border-orange-300 hover:text-orange-200">
-                <Home size={15} /> Home
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Link href="/admin" className="inline-flex min-h-12 items-center justify-center gap-2 bg-orange-500 px-5 text-sm font-black text-white shadow-lg shadow-orange-500/15 transition hover:bg-orange-600">
+                <Plus size={17} /> Add Organism
               </Link>
-              <Link href="/dashboard" className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-500/20 transition hover:bg-orange-400">
-                <LayoutDashboard size={15} /> Dashboard
-              </Link>
-              <Link href="/surveillance" className="inline-flex items-center justify-center gap-2 rounded-xl border border-teal-300/40 bg-teal-500/10 px-4 py-3 text-xs font-black uppercase tracking-widest text-teal-100 transition hover:bg-teal-500/20">
-                <Globe2 size={15} /> Surveillance
+              <Link href="/admin/uploads" className="inline-flex min-h-12 items-center justify-center gap-2 border border-slate-300 bg-white px-5 text-sm font-black text-[#0B1B3A] transition hover:border-orange-400 hover:text-orange-700">
+                <ClipboardCheck size={17} /> Review Queue
               </Link>
             </div>
           </div>
         </header>
 
-        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-6">
+        <section aria-label="Admin cockpit metrics" className="grid border border-slate-200 bg-white sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <MetricCard icon={UsersRound} label="Registered Users" value={loading ? '...' : String(userCount)} href="/admin/users" />
           <MetricCard icon={ClipboardCheck} label="Pending Uploads" value={loading ? '...' : String(pendingUploads)} href="/admin/uploads" />
           <MetricCard icon={BookOpenCheck} label="Pending Blog Posts" value={loading ? '...' : String(pendingPosts)} href="/admin/blogs" />
@@ -215,17 +277,15 @@ export default function AdminCockpitPage() {
           <MetricCard icon={History} label="Audit Events" value={loading ? '...' : String(auditEvents)} href="/admin/audit-logs" />
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-3 xl:grid-cols-6">
-          <AdminLink href="/admin/users" title="User Privilege Management" body="Assign Normal User, Contributor, Moderator, or Admin privileges." />
-          <AdminLink href="/admin/uploads" title="Pending Organism Review" body="Edit, approve, reject, or request changes for submitted organism metadata." />
-          <AdminLink href="/admin/blogs" title="Blog Approval Management" body="Review submitted blog posts before public publication." />
-          <AdminLink href="/admin/contact-messages" title={`Contact Messages (${loading ? '...' : unreadMessages})`} body="Read public collaboration requests and manage read or unread follow-up status." />
-          <AdminLink href="/admin/audit-logs" title="Admin Audit Logs" body="Inspect account, review, approval, and ingestion activity across the portal." />
-          <AdminLink href="/surveillance" title="Global Surveillance" body="Inspect the public world dashboard after approved records and MAYA results are published." />
+        <section aria-labelledby="admin-operations-title">
+          <div className="mb-4"><p className="text-xs font-black uppercase text-teal-700">Administrative workspace</p><h2 id="admin-operations-title" className="mt-1 text-2xl font-black">Operations</h2></div>
+          <div className="space-y-3">
+            {operationGroups.map((group) => <OperationGroup key={group.title} {...group} loading={loading} />)}
+          </div>
         </section>
 
         {session?.user?.role === 'ADMIN' && (
-          <section id="delete-management" className="rounded-3xl border border-red-200 bg-white p-5 shadow-sm md:p-7">
+          <section id="delete-management" className="rounded-lg border border-red-200 bg-white p-5 shadow-sm md:p-7">
             <div className="flex flex-col gap-4 border-b border-red-100 pb-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-red-500">Admin Danger Zone</p>
@@ -240,7 +300,7 @@ export default function AdminCockpitPage() {
             </div>
 
             {deleteMessage.type !== 'idle' && (
-              <div className={`mt-5 flex items-center gap-3 rounded-2xl p-4 text-sm font-bold ${deleteMessage.type === 'error' ? 'border border-red-200 bg-red-50 text-red-700' : 'border border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+              <div className={`mt-5 flex items-center gap-3 rounded-md p-4 text-sm font-bold ${deleteMessage.type === 'error' ? 'border border-red-200 bg-red-50 text-red-700' : 'border border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
                 {deleteMessage.text}
               </div>
             )}
@@ -285,7 +345,7 @@ export default function AdminCockpitPage() {
                           });
                           setDeleteConfirmation('');
                         }}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="inline-flex items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Trash2 size={13} /> Delete
                       </button>
@@ -324,7 +384,7 @@ export default function AdminCockpitPage() {
                         });
                         setDeleteConfirmation('');
                       }}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+                      className="inline-flex items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:opacity-50"
                     >
                       <Trash2 size={13} /> Delete
                     </button>
@@ -368,7 +428,7 @@ export default function AdminCockpitPage() {
                           });
                           setDeleteConfirmation('');
                         }}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+                        className="inline-flex items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:opacity-50"
                       >
                         <Trash2 size={13} /> Delete
                       </button>
@@ -402,28 +462,46 @@ export default function AdminCockpitPage() {
 
 function MetricCard({ icon: Icon, label, value, href }: { icon: LucideIcon; label: string; value: string; href: string }) {
   return (
-    <Link href={href} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-orange-300 hover:shadow-xl">
-      <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
-        <Icon size={23} />
-      </div>
-      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
-      <p className="mt-2 text-4xl font-black tracking-tight">{value}</p>
+    <Link href={href} className="flex min-h-28 items-center gap-4 border-b border-r border-slate-200 p-4 transition hover:bg-orange-50/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-orange-500 xl:border-b-0">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center bg-orange-50 text-orange-600"><Icon size={20} /></span>
+      <span className="min-w-0"><span className="block text-[10px] font-black uppercase text-slate-500">{label}</span><span className="mt-1 block font-mono text-2xl font-black">{value}</span></span>
     </Link>
   );
 }
 
-function AdminLink({ href, title, body }: { href: string; title: string; body: string }) {
+function OperationGroup({ title, description, icon: Icon, tone, actions, loading }: {
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  tone: string;
+  actions: Array<{ href: string; title: string; body: string; icon: LucideIcon }>;
+  loading: boolean;
+}) {
   return (
-    <Link href={href} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-orange-300 hover:shadow-xl">
-      <h2 className="text-xl font-black tracking-tight">{title}</h2>
-      <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">{body}</p>
-    </Link>
+    <section className="grid border border-slate-200 bg-white lg:grid-cols-[250px_minmax(0,1fr)]">
+      <div className="flex gap-4 border-b border-slate-200 p-5 lg:border-b-0 lg:border-r">
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center ${tone}`}><Icon size={19} /></span>
+        <div><h3 className="text-base font-black">{title}</h3><p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{description}</p></div>
+      </div>
+      <div className={`grid divide-y divide-slate-200 ${actions.length > 1 ? 'md:grid-cols-2 md:divide-x md:divide-y-0' : ''}`}>
+        {actions.map((action) => {
+          const ActionIcon = action.icon;
+          return (
+            <Link key={`${title}-${action.title}`} href={action.href} className="group flex min-h-24 items-center gap-4 p-5 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-teal-600">
+              <ActionIcon className="shrink-0 text-slate-500 group-hover:text-orange-600" size={19} />
+              <span className="min-w-0 flex-1"><span className="block text-sm font-black">{action.title}</span><span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{loading ? 'Loading current status...' : action.body}</span></span>
+              <ArrowRight className="shrink-0 text-slate-300 transition group-hover:translate-x-1 group-hover:text-orange-600" size={16} />
+            </Link>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
 function DangerMetric({ label, value, deleted }: { label: string; value: string; deleted: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
       <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
       <p className="mt-1 text-2xl font-black tracking-tight">{value}</p>
       <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">Deleted / archived: {deleted}</p>
@@ -440,10 +518,10 @@ function DangerCard({ title, description, searchValue, onSearchChange, searchPla
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+    <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
       <h3 className="text-xl font-black tracking-tight">{title}</h3>
       <p className="mt-2 min-h-[72px] text-sm font-semibold leading-6 text-slate-600">{description}</p>
-      <label className="mt-4 flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3">
+      <label className="mt-4 flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
         <Search size={15} className="text-slate-400" />
         <input
           value={searchValue}
@@ -461,7 +539,7 @@ function DangerCard({ title, description, searchValue, onSearchChange, searchPla
 
 function DangerRow({ children }: { children: ReactNode }) {
   return (
-    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+    <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
       {children}
     </div>
   );
@@ -469,7 +547,7 @@ function DangerRow({ children }: { children: ReactNode }) {
 
 function EmptyDangerState({ label }: { label: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm font-bold text-slate-500">
+    <div className="rounded-md border border-dashed border-slate-200 bg-white p-6 text-center text-sm font-bold text-slate-500">
       {label}
     </div>
   );

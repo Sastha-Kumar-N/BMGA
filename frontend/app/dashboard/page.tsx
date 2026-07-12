@@ -22,16 +22,18 @@ import {
   Lock,
   LogOut,
   MapPin,
+  Menu,
   Microscope,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCcw,
   Search,
   ShieldAlert,
   TestTube2,
+  X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../lib/api-client';
-import { BRAND_FULL_NAME } from '../lib/brand';
-import BrandLogo from '../components/BrandLogo';
 import type { AtlasStrain } from '../components/IndiaOrganismAtlas';
 
 const IndiaOrganismAtlas = dynamic(() => import('../components/IndiaOrganismAtlas'), {
@@ -239,6 +241,17 @@ export default function Dashboard() {
   const [selectedStrainId, setSelectedStrainId] = useState('');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileSidebarOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileSidebarOpen]);
 
   useEffect(() => {
     let isMounted = true;
@@ -342,66 +355,104 @@ export default function Dashboard() {
 
   return (
     <div className="flex min-h-screen bg-[#f6f8fb] text-slate-900 selection:bg-orange-500/20">
-      <aside className="hidden w-72 shrink-0 flex-col border-r border-white/10 bg-[#0B1B3A] px-5 py-6 text-white xl:flex">
-        <button onClick={() => setSelectedStrainId('')} className="mb-8 text-left" aria-label={`${BRAND_FULL_NAME} dashboard home`}>
-          <BrandLogo variant="light" />
+      <aside className={`hidden shrink-0 flex-col border-r border-white/10 bg-[#0B1B3A] py-4 text-white transition-[width,padding] duration-200 xl:flex ${sidebarCollapsed ? 'w-20 px-2' : 'w-72 px-5'}`}>
+        <button
+          type="button"
+          onClick={() => setSidebarCollapsed((current) => !current)}
+          aria-label={sidebarCollapsed ? 'Expand India surveillance sidebar' : 'Collapse India surveillance sidebar'}
+          aria-expanded={!sidebarCollapsed}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={`mb-3 inline-flex h-10 items-center justify-center rounded-md border border-white/10 text-slate-300 transition hover:border-orange-400 hover:text-white ${sidebarCollapsed ? 'w-full' : 'w-10'}`}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button>
 
-        <nav className="space-y-2">
-          <SidebarButton active icon={LayoutDashboard} label="Dashboard" onClick={() => setSelectedStrainId('')} />
-          <SidebarButton icon={MapPin} label="India Atlas" onClick={scrollToAtlas} />
-          <SidebarButton icon={Microscope} label="MAYA Results" onClick={() => openOrganismResults(selectedStrain?.organismId)} disabled={!selectedStrain} />
-          <SidebarButton icon={Binary} label="Genome Toolset" onClick={() => openGenomeTools()} disabled={!selectedStrain} />
-          <Link href="/surveillance" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold text-teal-200 transition hover:bg-teal-500/10 hover:text-white">
-            <Globe2 size={17} />
-            Global Surveillance
-          </Link>
-          {session?.user?.role === 'ADMIN' && (
-            <Link href="/admin" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold text-slate-300 transition hover:bg-white/5 hover:text-white">
-              <Lock size={17} />
-              Admin Portal
-            </Link>
-          )}
-          <Link href="/fair" className="flex items-center gap-3 rounded-md px-4 py-3 text-sm font-bold text-slate-300 transition hover:bg-white/5 hover:text-white">
-            <FileSearch size={17} />
-            FAIR Data
-          </Link>
-        </nav>
+        <IndiaSidebarNavigation
+          compact={sidebarCollapsed}
+          selectedStrain={selectedStrain}
+          isAdmin={session?.user?.role === 'ADMIN'}
+          onDashboard={() => setSelectedStrainId('')}
+          onAtlas={scrollToAtlas}
+          onResults={() => openOrganismResults(selectedStrain?.organismId)}
+          onGenome={() => openGenomeTools()}
+          onNavigate={() => undefined}
+        />
 
-        <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Selected organism</p>
-          <p className="mt-2 text-sm font-black italic leading-tight text-white">
-            {selectedStrain?.organism?.scientificName || 'Awaiting selection'}
-          </p>
-          <p className="mt-1 text-xs font-bold text-orange-300">{selectedStrain?.strainName || 'No active strain'}</p>
-        </div>
-
-        <div className="mt-auto border-t border-white/10 pt-5">
-          <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/5 p-4">
-            <div className="min-w-0">
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Active Session</p>
-              <p className="truncate text-sm font-black text-white">{session?.user?.name || 'Guest Researcher'}</p>
+        {!sidebarCollapsed && (
+          <div className="mt-auto border-t border-white/10 pt-5">
+            <div className="flex items-center justify-between gap-3 rounded-md bg-white/5 p-4">
+              <div className="min-w-0">
+                <p className="text-[9px] font-black uppercase text-slate-500">Active Session</p>
+                <p className="truncate text-sm font-black text-white">{session?.user?.name || 'Guest Researcher'}</p>
+              </div>
+              {session ? (
+                <button onClick={() => signOut()} className="rounded-md p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300" aria-label="Sign out">
+                  <LogOut size={16} />
+                </button>
+              ) : (
+                <Link href="/login" className="rounded-md bg-white px-3 py-2 text-xs font-black uppercase text-[#0B1B3A]">
+                  Login
+                </Link>
+              )}
             </div>
-            {session ? (
-              <button onClick={() => signOut()} className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300" aria-label="Sign out">
-                <LogOut size={16} />
-              </button>
-            ) : (
-              <Link href="/login" className="rounded-xl bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-[#0B1B3A]">
-                Login
-              </Link>
-            )}
           </div>
-        </div>
+        )}
       </aside>
 
+      {mobileSidebarOpen && (
+        <div className="fixed inset-0 z-[1000] xl:hidden">
+          <button
+            type="button"
+            aria-label="Close India surveillance navigation"
+            onClick={() => setMobileSidebarOpen(false)}
+            className="absolute inset-0 bg-[#07172f]/70"
+          />
+          <aside className="relative flex h-full w-[min(320px,88vw)] flex-col overflow-y-auto bg-[#0B1B3A] p-4 text-white shadow-2xl">
+            <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-4">
+              <div>
+                <p className="text-[10px] font-black uppercase text-orange-300">India surveillance</p>
+                <p className="mt-1 text-sm font-black">Dashboard navigation</p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close India surveillance navigation"
+                onClick={() => setMobileSidebarOpen(false)}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-white/15 text-slate-200"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <IndiaSidebarNavigation
+              compact={false}
+              selectedStrain={selectedStrain}
+              isAdmin={session?.user?.role === 'ADMIN'}
+              onDashboard={() => setSelectedStrainId('')}
+              onAtlas={scrollToAtlas}
+              onResults={() => openOrganismResults(selectedStrain?.organismId)}
+              onGenome={() => openGenomeTools()}
+              onNavigate={() => setMobileSidebarOpen(false)}
+            />
+          </aside>
+        </div>
+      )}
+
       <main className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 px-5 py-4 backdrop-blur md:px-8">
+        <header className="sticky top-[76px] z-30 border-b border-slate-200 bg-white/90 px-5 py-4 backdrop-blur md:px-8">
           <div className="mx-auto flex max-w-7xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h1 className="text-3xl font-black tracking-tight text-[#0B1B3A] md:text-4xl">India Genomic Surveillance</h1>
-              <p className="mt-1 text-sm font-bold text-slate-500">Approved national genome records, MAYA evidence, AMR signals, and interoperable reference tools.</p>
-              <Link href="/surveillance" className="mt-3 inline-flex items-center gap-2 text-xs font-black uppercase text-teal-700 xl:hidden"><Globe2 size={15} /> Global Surveillance</Link>
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(true)}
+                aria-label="Open India surveillance navigation"
+                aria-expanded={mobileSidebarOpen}
+                className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-[#0B1B3A] shadow-sm xl:hidden"
+              >
+                <Menu size={20} />
+              </button>
+              <div>
+                <h1 className="text-3xl font-black tracking-tight text-[#0B1B3A] md:text-4xl">India Genomic Surveillance</h1>
+                <p className="mt-1 text-sm font-bold text-slate-500">Approved national genome records, MAYA evidence, AMR signals, and interoperable reference tools.</p>
+              </div>
             </div>
 
             <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -510,9 +561,89 @@ export default function Dashboard() {
   );
 }
 
-function SidebarButton({ active = false, disabled = false, icon: Icon, label, onClick }: {
+function IndiaSidebarNavigation({
+  compact,
+  selectedStrain,
+  isAdmin,
+  onDashboard,
+  onAtlas,
+  onResults,
+  onGenome,
+  onNavigate,
+}: {
+  compact: boolean;
+  selectedStrain: StrainRecord | null;
+  isAdmin: boolean;
+  onDashboard: () => void;
+  onAtlas: () => void;
+  onResults: () => void;
+  onGenome: () => void;
+  onNavigate: () => void;
+}) {
+  const run = (action: () => void) => {
+    action();
+    onNavigate();
+  };
+  const linkClass = `flex min-h-11 items-center rounded-md py-3 text-sm font-bold transition ${compact ? 'justify-center px-2' : 'gap-3 px-4'}`;
+
+  return (
+    <>
+      <nav aria-label="India surveillance navigation" className="space-y-2">
+        <SidebarButton compact={compact} active icon={LayoutDashboard} label="Dashboard" onClick={() => run(onDashboard)} />
+        <SidebarButton compact={compact} icon={MapPin} label="India Atlas" onClick={() => run(onAtlas)} />
+        <SidebarButton compact={compact} icon={Microscope} label="MAYA Results" onClick={() => run(onResults)} disabled={!selectedStrain} />
+        <SidebarButton compact={compact} icon={Binary} label="Genome Toolset" onClick={() => run(onGenome)} disabled={!selectedStrain} />
+        <Link
+          href="/surveillance"
+          onClick={onNavigate}
+          aria-label={compact ? 'Global Surveillance' : undefined}
+          title={compact ? 'Global Surveillance' : undefined}
+          className={`${linkClass} text-teal-200 hover:bg-teal-500/10 hover:text-white`}
+        >
+          <Globe2 className="shrink-0" size={17} />
+          <span className={compact ? 'sr-only' : ''}>Global Surveillance</span>
+        </Link>
+        {isAdmin && (
+          <Link
+            href="/admin"
+            onClick={onNavigate}
+            aria-label={compact ? 'Admin Portal' : undefined}
+            title={compact ? 'Admin Portal' : undefined}
+            className={`${linkClass} text-slate-300 hover:bg-white/5 hover:text-white`}
+          >
+            <Lock className="shrink-0" size={17} />
+            <span className={compact ? 'sr-only' : ''}>Admin Portal</span>
+          </Link>
+        )}
+        <Link
+          href="/fair"
+          onClick={onNavigate}
+          aria-label={compact ? 'FAIR Data' : undefined}
+          title={compact ? 'FAIR Data' : undefined}
+          className={`${linkClass} text-slate-300 hover:bg-white/5 hover:text-white`}
+        >
+          <FileSearch className="shrink-0" size={17} />
+          <span className={compact ? 'sr-only' : ''}>FAIR Data</span>
+        </Link>
+      </nav>
+
+      {!compact && (
+        <div className="mt-8 rounded-md border border-white/10 bg-white/5 p-4">
+          <p className="text-[10px] font-black uppercase text-slate-500">Selected organism</p>
+          <p className="mt-2 text-sm font-black italic leading-tight text-white">
+            {selectedStrain?.organism?.scientificName || 'Awaiting selection'}
+          </p>
+          <p className="mt-1 text-xs font-bold text-orange-300">{selectedStrain?.strainName || 'No active strain'}</p>
+        </div>
+      )}
+    </>
+  );
+}
+
+function SidebarButton({ active = false, disabled = false, compact = false, icon: Icon, label, onClick }: {
   active?: boolean;
   disabled?: boolean;
+  compact?: boolean;
   icon: typeof Dna;
   label: string;
   onClick: () => void;
@@ -521,7 +652,9 @@ function SidebarButton({ active = false, disabled = false, icon: Icon, label, on
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex w-full items-center gap-3 rounded-md px-4 py-3 text-left text-sm font-bold transition ${
+      aria-label={compact ? label : undefined}
+      title={compact ? label : undefined}
+      className={`flex min-h-11 w-full items-center rounded-md py-3 text-left text-sm font-bold transition ${compact ? 'justify-center px-2' : 'gap-3 px-4'} ${
         active
           ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20'
           : disabled
@@ -529,8 +662,8 @@ function SidebarButton({ active = false, disabled = false, icon: Icon, label, on
             : 'text-slate-300 hover:bg-white/5 hover:text-white'
       }`}
     >
-      <Icon size={17} />
-      {label}
+      <Icon className="shrink-0" size={17} />
+      <span className={compact ? 'sr-only' : ''}>{label}</span>
     </button>
   );
 }
