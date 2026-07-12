@@ -125,7 +125,7 @@ export default function HomeIndiaMap({ strains, loading = false, error = null }:
   ), [strains]);
 
   return (
-    <div className="relative h-full min-h-[420px] overflow-hidden rounded-lg border border-cyan-300/10 bg-[#06152E] shadow-xl shadow-cyan-950/20 lg:min-h-[560px]">
+    <div className="isolate relative z-0 h-full min-h-[420px] overflow-hidden rounded-lg border border-cyan-300/10 bg-[#06152E] shadow-xl shadow-cyan-950/20 lg:min-h-[560px]">
       <MapContainer
         center={INDIA_CENTER}
         zoom={5}
