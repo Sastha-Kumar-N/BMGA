@@ -84,8 +84,11 @@ const leadershipMembers: CoreMember[] = [
   {
     name: 'Dr. Nidheesh M.',
     title: 'Principal, School of Physical Sciences, Amritapuri | Associate Professor, School of Biotechnology, Amritapuri',
+    email: 'nidheesh@am.amrita.edu',
     portraitSrc: '/team/Dr-Nidheesh-M.png',
     portraitAlt: 'Portrait of Dr. Nidheesh M.',
+    expertise: ['Administrator', 'Research partnerships', 'Resources and infrastructure'],
+
     icon: BrainCircuit,
   },
 ];
