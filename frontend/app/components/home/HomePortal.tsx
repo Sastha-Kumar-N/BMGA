@@ -100,6 +100,18 @@ function freshnessLabel(value?: string | null) {
   return `Data through ${formatDate(value)}`;
 }
 
+function surveillanceRegion(latitude: number, longitude: number) {
+  if (longitude < -30) return latitude < 15 ? 'South America' : 'North America';
+  if (longitude >= 110 && latitude < -10) return 'Oceania';
+  if (longitude >= 95 && latitude < 25) return 'Southeast Asia';
+  if (longitude >= 65 && longitude < 95 && latitude < 38) return 'South Asia';
+  if (longitude >= 95) return 'East Asia';
+  if (longitude >= -25 && longitude < 55 && latitude < 35) return 'Africa';
+  if (longitude >= -25 && longitude < 45 && latitude >= 35) return 'Europe';
+  if (longitude >= 45 && longitude < 65) return 'West Asia';
+  return 'Other regions';
+}
+
 export default function HomePortal() {
   const { data: session } = useSession();
   const { data, loading, refreshing, error } = useHomePortalData();
@@ -139,6 +151,16 @@ export default function HomePortal() {
 
   const sourceMaximum = Math.max(1, ...(overview?.sources.map((source) => source.count) || [1]));
   const latestIndiaRecords = indiaStrains.slice(0, 4);
+  const regionalSignals = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (overview?.locations || []).forEach((location) => {
+      const region = surveillanceRegion(location.latitude, location.longitude);
+      counts[region] = (counts[region] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([label, count]) => ({ label, count }))
+      .sort((left, right) => right.count - left.count);
+  }, [overview?.locations]);
 
   const workspaceRows: Array<{
     title: string;
@@ -186,14 +208,14 @@ export default function HomePortal() {
     <>
       <HomeNavigation genomeHref={baseGenomeHref} />
       <main id="main-content" className="min-h-screen bg-white text-[#0B1B3A] selection:bg-orange-500/20">
-        <section id="home" aria-labelledby="home-title" className="isolate relative min-h-[calc(100svh-8rem)] overflow-hidden bg-[#06152e] text-white lg:min-h-[620px]">
+        <section id="home" aria-labelledby="home-title" className="isolate relative min-h-[calc(100svh-8rem)] overflow-hidden bg-[#06152e] text-white lg:min-h-[660px]">
           <HomeGlobalMap locations={overview?.locations || []} />
-          <div className="pointer-events-none absolute inset-0 z-10 bg-[linear-gradient(90deg,rgba(4,17,38,0.98)_0%,rgba(4,17,38,0.91)_32%,rgba(4,17,38,0.38)_63%,rgba(4,17,38,0.1)_100%)]" />
+          <div className="pointer-events-none absolute inset-0 z-10 bg-[linear-gradient(90deg,rgba(4,17,38,0.97)_0%,rgba(4,17,38,0.88)_28%,rgba(4,17,38,0.42)_58%,rgba(4,17,38,0.12)_100%)]" />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-40 bg-gradient-to-t from-[#06152e] to-transparent" />
 
-          <div className="relative z-20 mx-auto flex min-h-[calc(100svh-8rem)] max-w-[1320px] items-center px-4 py-16 sm:px-6 lg:min-h-[620px] lg:px-8">
-            <div className="max-w-3xl py-4">
-              <h1 id="home-title" className="max-w-3xl text-4xl font-black leading-[1.05] sm:text-5xl lg:text-6xl xl:text-7xl">
+          <div className="relative z-20 mx-auto flex min-h-[calc(100svh-8rem)] max-w-[1320px] items-center px-4 py-14 sm:px-6 lg:min-h-[660px] lg:pb-40 lg:pt-16 lg:px-8">
+            <div className="max-w-[640px] py-4">
+              <h1 id="home-title" className="max-w-[640px] text-4xl font-black leading-[1.06] sm:text-5xl lg:text-6xl">
                 Microbial genomes.<br />Global context.<br /><span className="text-orange-400">Actionable evidence.</span>
               </h1>
               <p className="mt-6 max-w-2xl text-base font-semibold leading-7 text-slate-200 sm:text-lg sm:leading-8">
@@ -211,20 +233,41 @@ export default function HomePortal() {
                 <span className="inline-flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${error ? 'bg-amber-400' : 'bg-emerald-400'} ${refreshing ? 'animate-pulse' : ''}`} />{error || 'Live database connection available'}</span>
                 <span className="inline-flex items-center gap-2"><Clock3 size={14} className="text-teal-300" />{loading ? 'Loading data freshness...' : freshnessLabel(overview?.dataThrough)}</span>
               </div>
+              <div className="mt-6 grid grid-cols-2 border border-white/15 bg-[#06152e]/75 text-xs backdrop-blur lg:hidden">
+                <MobileHeroSignal label="Approved records" value={metric(overview?.metrics.approvedStrains, loading)} />
+                <MobileHeroSignal label="Mapped locations" value={metric(overview?.locations.length, loading)} />
+                <MobileHeroSignal label="Reference genomes" value={metric(referenceStrains.length, loading)} />
+                <MobileHeroSignal label="Refresh cycle" value={overview ? `${overview.refreshIntervalSeconds}s` : loading ? '...' : 'N/A'} />
+              </div>
             </div>
           </div>
 
-          <div className="absolute bottom-8 right-8 z-30 hidden w-72 border border-white/20 bg-[#06152e]/90 p-5 shadow-2xl backdrop-blur lg:block">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <p className="text-xs font-black uppercase text-white">Data freshness</p>
-              <RefreshCw className={refreshing ? 'animate-spin text-teal-300' : 'text-slate-400'} size={15} />
+          <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 hidden lg:block">
+            <div className="mx-auto flex max-w-[1320px] items-end gap-5 px-8">
+              <div className="min-w-0 flex-1 border border-white/15 bg-[#06152e]/84 p-4 shadow-xl backdrop-blur">
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-[10px] font-black uppercase text-slate-300">Regional signal from approved database locations</p>
+                  <span className="font-mono text-[10px] font-black text-teal-300">{metric(overview?.locations.length, loading)} mapped</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+                  {regionalSignals.length ? regionalSignals.map((region) => (
+                    <span key={region.label} className="inline-flex items-center gap-2 text-xs font-bold text-slate-300"><span className="h-2 w-2 rounded-full bg-teal-400" />{region.label} <span className="font-mono text-white">{region.count}</span></span>
+                  )) : <span className="text-xs font-semibold text-slate-400">{loading ? 'Loading mapped regions...' : 'No approved geocoded records yet.'}</span>}
+                </div>
+              </div>
+              <div className="w-72 shrink-0 border border-white/20 bg-[#06152e]/90 p-5 shadow-2xl backdrop-blur">
+                <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                  <p className="text-xs font-black uppercase text-white">Data freshness</p>
+                  <RefreshCw className={refreshing ? 'animate-spin text-teal-300' : 'text-slate-400'} size={15} />
+                </div>
+                <dl className="mt-3 space-y-3 text-xs">
+                  <FreshnessRow label="Approved records" value={metric(overview?.metrics.approvedStrains, loading)} />
+                  <FreshnessRow label="Mapped locations" value={metric(overview?.locations.length, loading)} />
+                  <FreshnessRow label="Reference genomes" value={metric(referenceStrains.length, loading)} />
+                  <FreshnessRow label="Refresh cycle" value={overview ? `${overview.refreshIntervalSeconds}s` : loading ? '...' : 'N/A'} />
+                </dl>
+              </div>
             </div>
-            <dl className="mt-3 space-y-3 text-xs">
-              <FreshnessRow label="Approved records" value={metric(overview?.metrics.approvedStrains, loading)} />
-              <FreshnessRow label="Mapped locations" value={metric(overview?.locations.length, loading)} />
-              <FreshnessRow label="Reference genomes" value={metric(referenceStrains.length, loading)} />
-              <FreshnessRow label="Refresh cycle" value={overview ? `${overview.refreshIntervalSeconds}s` : loading ? '...' : 'N/A'} />
-            </dl>
           </div>
         </section>
 
@@ -417,6 +460,10 @@ export default function HomePortal() {
 
 function FreshnessRow({ label, value }: { label: string; value: string }) {
   return <div className="flex items-center justify-between gap-4"><dt className="font-semibold text-slate-400">{label}</dt><dd className="font-mono font-black text-white">{value}</dd></div>;
+}
+
+function MobileHeroSignal({ label, value }: { label: string; value: string }) {
+  return <div className="border-b border-r border-white/10 p-3 even:border-r-0 [&:nth-last-child(-n+2)]:border-b-0"><p className="font-mono text-base font-black text-white">{value}</p><p className="mt-1 text-[10px] font-bold text-slate-400">{label}</p></div>;
 }
 
 function MetricCell({ icon: Icon, label, value, detail, tone }: { icon: LucideIcon; label: string; value: string; detail: string; tone: string }) {

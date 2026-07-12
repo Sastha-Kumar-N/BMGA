@@ -54,7 +54,7 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
             <span className="sm:hidden"><BrandLogo variant="light" size="sm" showText={false} /></span>
             <span className="hidden sm:inline-flex"><BrandLogo variant="light" size="sm" /></span>
           </Link>
-          <nav aria-label="Portal navigation" className="ml-auto hidden items-center gap-1 lg:flex">
+          <nav aria-label="Portal navigation" className="ml-auto hidden items-center gap-1 xl:flex">
             {portalLinks.map((link) => {
               const active = link.href === '/surveillance' && pathname.startsWith('/surveillance');
               return (
@@ -69,7 +69,7 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
               );
             })}
           </nav>
-          <div className="ml-auto flex items-center gap-2 lg:ml-3">
+          <div className="ml-auto flex items-center gap-2 xl:ml-3">
             {session ? (
               <>
                 <Link href="/account" className="hidden rounded-md border border-white/15 px-3 py-2 text-xs font-bold text-slate-100 transition hover:border-teal-300 hover:text-teal-200 sm:inline-flex">
@@ -89,7 +89,7 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
               aria-label="Open surveillance navigation"
               aria-expanded={mobileOpen}
               onClick={() => setMobileOpen(true)}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-white/15 text-white xl:hidden"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-white/15 text-white 2xl:hidden"
             >
               <Menu size={20} />
             </button>
@@ -97,17 +97,19 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-[1600px] xl:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="hidden min-h-[calc(100vh-4rem)] border-r border-white/10 bg-[#07172f] p-4 text-white xl:block">
-          <SurveillanceNavigation pathname={pathname} onNavigate={() => undefined} />
+      <div className="mx-auto grid w-full max-w-[1600px] 2xl:grid-cols-[240px_minmax(0,1fr)]">
+        <aside className="hidden min-h-[calc(100vh-4rem)] border-r border-white/10 bg-[#07172f] p-4 text-white 2xl:block">
+          <div className="sticky top-20">
+            <SurveillanceNavigation pathname={pathname} onNavigate={() => undefined} />
+          </div>
         </aside>
-        <main id="surveillance-main" className="min-w-0 px-4 py-6 sm:px-6 lg:px-8">
+        <main id="surveillance-main" className="min-w-0 max-w-full overflow-hidden px-4 py-6 sm:px-6 lg:px-8">
           {children}
         </main>
       </div>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-[70] xl:hidden">
+        <div className="fixed inset-0 z-[70] 2xl:hidden">
           <button className="absolute inset-0 bg-[#07172f]/70" aria-label="Close surveillance navigation" onClick={() => setMobileOpen(false)} />
           <aside className="relative h-full w-[min(320px,88vw)] overflow-y-auto bg-[#07172f] p-4 text-white shadow-2xl">
             <div className="mb-5 flex items-center justify-between">

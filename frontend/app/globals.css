@@ -52,7 +52,7 @@ html {
 }
 
 .bmga-world-hero-map .leaflet-tile-pane {
-  filter: brightness(0.58) saturate(0.72) sepia(0.12) hue-rotate(158deg);
+  filter: brightness(0.68) saturate(0.9) sepia(0.08) hue-rotate(158deg);
 }
 
 .bmga-world-hero-map .leaflet-control-attribution {
