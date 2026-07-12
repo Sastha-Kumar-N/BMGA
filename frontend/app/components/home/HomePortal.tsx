@@ -431,12 +431,12 @@ export default function HomePortal() {
           <div className="mx-auto max-w-[1320px]">
             <div className="max-w-3xl">
               <h2 className="text-3xl font-black sm:text-4xl">Programs connected by one data foundation</h2>
-              <p className="mt-4 text-base font-semibold leading-7 text-slate-600">BMGA combines national microbial genomics, international surveillance, analysis tooling, and reusable scientific metadata without mixing their interpretation boundaries.</p>
+              <p className="mt-4 text-base font-semibold leading-7 text-slate-600">BMGA connects microbial genomics, indigenous biodiversity documentation, artificial intelligence research, and reusable scientific metadata through complementary programs.</p>
             </div>
             <div className="mt-10 grid gap-5 lg:grid-cols-3">
               <ProjectCard icon={Map} title="Bharat Microbial Genome Atlas" body="India-focused organism discovery, geographic source context, MAYA outputs, and curated microbial genome metadata." href="/dashboard" accent="bg-orange-500" />
-              <ProjectCard icon={Globe2} title="Global Surveillance Network" body="A dedicated worldwide view of approved strain data, freshness, AMR signals, and clearly separated evidence types." href="/surveillance" accent="bg-teal-600" />
-              <ProjectCard icon={Dna} title="Open Genome Analysis" body="Reference-aware genome browsers, authenticated BLAST search, machine-readable metadata, and FAIR reuse guidance." href={baseGenomeHref} accent="bg-emerald-600" />
+              <ProjectCard icon={Dna} title="Bharat Genome Database" body="A dedicated platform to document, understand, and protect the genomic heritage of Bharat's indigenous species. At the Bharat Genome Database, we are on a mission to unlock the genetic secrets of Bharat's most diverse and unique life forms - our indigenous species. Our commitment to preserving the biological heritage of our planet is rooted in a deep reverence for the natural world and a profound understanding of its interconnectedness." href="/about" accent="bg-teal-600" />
+              <ProjectCard icon={Code2} title="GenAI Research Labs" attribution="An SSF Initiative" attributionHref="https://genairesearch.org/index.html" body="Focuses on interdisciplinary approaches that integrate genomics, artificial intelligence, and computational biology to address complex biological challenges." href="https://genairesearch.org/index.html" accent="bg-emerald-600" external />
             </div>
           </div>
         </section>
@@ -533,6 +533,7 @@ function LifecycleStep({ number, icon: Icon, title, body }: { number: string; ic
   return <li className="min-h-52 bg-white p-5"><div className="flex items-center justify-between"><Icon className="text-teal-700" size={22} /><span className="font-mono text-xs font-black text-slate-400">{number}</span></div><h3 className="mt-8 text-base font-black">{title}</h3><p className="mt-3 text-xs font-semibold leading-5 text-slate-600">{body}</p></li>;
 }
 
-function ProjectCard({ icon: Icon, title, body, href, accent }: { icon: LucideIcon; title: string; body: string; href: string; accent: string }) {
-  return <article className="relative flex min-h-72 flex-col overflow-hidden border border-slate-200 bg-white p-7 shadow-sm"><span className={`absolute inset-x-0 top-0 h-1.5 ${accent}`} /><Icon className="text-[#0B1B3A]" size={29} /><h3 className="mt-8 text-xl font-black">{title}</h3><p className="mt-4 flex-1 text-sm font-semibold leading-7 text-slate-600">{body}</p><Link href={href} className="mt-6 inline-flex min-h-11 items-center gap-2 text-sm font-black text-orange-700 hover:text-[#0B1B3A]">Explore program <ArrowRight size={16} /></Link></article>;
+function ProjectCard({ icon: Icon, title, body, href, accent, external = false, attribution, attributionHref }: { icon: LucideIcon; title: string; body: string; href: string; accent: string; external?: boolean; attribution?: string; attributionHref?: string }) {
+  const actionClass = 'mt-6 inline-flex min-h-11 items-center gap-2 text-sm font-black text-orange-700 hover:text-[#0B1B3A]';
+  return <article className="relative flex min-h-72 flex-col overflow-hidden border border-slate-200 bg-white p-7 shadow-sm"><span className={`absolute inset-x-0 top-0 h-1.5 ${accent}`} /><Icon className="text-[#0B1B3A]" size={29} /><h3 className="mt-8 text-xl font-black">{title}</h3>{attribution && attributionHref && <a href={attributionHref} target="_blank" rel="noreferrer" className="mt-2 text-xs font-black text-teal-700 hover:text-orange-700">{attribution} <ExternalLink className="inline" size={12} /></a>}<p className="mt-4 flex-1 text-sm font-semibold leading-7 text-slate-600">{body}</p>{external ? <a href={href} target="_blank" rel="noreferrer" className={actionClass}>Explore program <ExternalLink size={16} /></a> : <Link href={href} className={actionClass}>Explore program <ArrowRight size={16} /></Link>}</article>;
 }
