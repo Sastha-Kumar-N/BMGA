@@ -16,5 +16,13 @@ export default withAuth({
 });
 
 export const config = {
-  matcher: ["/admin/:path*", "/account/:path*", "/submit-organism/:path*", "/blog/create/:path*"],
+  matcher: [
+    "/admin/:path*",
+    "/account/:path*",
+    "/dashboard/:path*",
+    "/surveillance/:path*",
+    "/organisms/:organismId/genome",
+    "/submit-organism/:path*",
+    "/blog/create/:path*",
+  ],
 };

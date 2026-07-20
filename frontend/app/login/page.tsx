@@ -37,7 +37,9 @@ export default function LoginPage() {
     setLoading(false);
 
     if (result?.ok) {
-      router.push("/account");
+      const requestedCallback = new URLSearchParams(window.location.search).get('callbackUrl');
+      router.push(safeCallbackPath(requestedCallback));
+      router.refresh();
     } else {
       setError("Invalid credentials! Please try again.");
     }
@@ -174,4 +176,18 @@ export default function LoginPage() {
       </form>
     </main>
   );
+}
+
+function safeCallbackPath(value: string | null) {
+  if (!value) return '/account';
+
+  try {
+    const destination = new URL(value, window.location.origin);
+    if (destination.origin !== window.location.origin || !destination.pathname.startsWith('/')) {
+      return '/account';
+    }
+    return `${destination.pathname}${destination.search}${destination.hash}`;
+  } catch {
+    return '/account';
+  }
 }

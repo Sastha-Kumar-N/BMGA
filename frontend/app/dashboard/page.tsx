@@ -330,9 +330,14 @@ export default function Dashboard() {
     router.push(`/organisms/${organismId}/results`);
   };
 
-  const openGenomeTools = (tool: 'jbrowse' | 'igv' | 'blast' = 'jbrowse') => {
+  const openGenomeTools = (tool?: 'jbrowse' | 'igv' | 'blast') => {
     if (!selectedStrain?.organismId || !selectedStrain.id) return;
-    router.push(`/organisms/${selectedStrain.organismId}/genome?strain=${selectedStrain.id}&tool=${tool}`);
+    const referenceReady = Boolean(
+      selectedStrain.referenceKinds?.includes('FASTA')
+      && selectedStrain.referenceKinds.includes('FAI'),
+    );
+    const selectedTool = tool || (referenceReady ? 'jbrowse' : 'blast');
+    router.push(`/organisms/${selectedStrain.organismId}/genome?strain=${selectedStrain.id}&tool=${selectedTool}`);
   };
   const openGenomeToolsFor = (strain: StrainRecord) => {
     router.push(`/organisms/${strain.organismId}/genome?strain=${strain.id}`);
@@ -542,7 +547,7 @@ export default function Dashboard() {
                 onOpenGenome={openGenomeToolsFor}
               />
             </div>
-            <GenomeToolsetPanel strain={selectedStrain} onOpen={openGenomeTools} />
+            <GenomeToolsetPanel strain={selectedStrain} isAdmin={session?.user?.role === 'ADMIN'} onOpen={openGenomeTools} />
           </section>
 
           <section className="grid gap-5 lg:grid-cols-2">
@@ -705,7 +710,7 @@ function EvidenceBoundary() {
   );
 }
 
-function GenomeToolsetPanel({ strain, onOpen }: { strain: StrainRecord | null; onOpen: (tool: 'jbrowse' | 'igv' | 'blast') => void }) {
+function GenomeToolsetPanel({ strain, isAdmin, onOpen }: { strain: StrainRecord | null; isAdmin: boolean; onOpen: (tool: 'jbrowse' | 'igv' | 'blast') => void }) {
   const referenceReady = Boolean(strain?.referenceKinds?.includes('FASTA') && strain.referenceKinds.includes('FAI'));
   const tools: Array<{ id: 'jbrowse' | 'igv' | 'blast'; label: string; detail: string; icon: LucideIcon; requiresReference: boolean }> = [
     { id: 'jbrowse', label: 'JBrowse 2', detail: 'Reference sequence and GFF3 annotations', icon: Binary, requiresReference: true },
@@ -718,9 +723,15 @@ function GenomeToolsetPanel({ strain, onOpen }: { strain: StrainRecord | null; o
       <div className="divide-y divide-slate-100">
         {tools.map((tool) => {
           const available = Boolean(strain) && (!tool.requiresReference || referenceReady);
-          return <button key={tool.id} type="button" onClick={() => onOpen(tool.id)} disabled={!strain} className="flex w-full items-center gap-3 px-5 py-4 text-left transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"><span className="flex h-10 w-10 shrink-0 items-center justify-center bg-[#0B1B3A] text-white"><tool.icon size={18} /></span><span className="min-w-0 flex-1"><span className="block text-sm font-black">{tool.label}</span><span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{tool.detail}</span></span><span className={`shrink-0 px-2 py-1 text-[9px] font-black uppercase ${available ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{available ? 'Open' : tool.requiresReference ? 'Needs FASTA' : 'Select strain'}</span></button>;
+          return <button key={tool.id} type="button" onClick={() => onOpen(tool.id)} disabled={!available} className="flex w-full items-center gap-3 px-5 py-4 text-left transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"><span className="flex h-10 w-10 shrink-0 items-center justify-center bg-[#0B1B3A] text-white"><tool.icon size={18} /></span><span className="min-w-0 flex-1"><span className="block text-sm font-black">{tool.label}</span><span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{tool.detail}</span></span><span className={`shrink-0 px-2 py-1 text-[9px] font-black uppercase ${available ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{available ? 'Open' : tool.requiresReference ? 'Needs FASTA + FAI' : 'Select strain'}</span></button>;
         })}
       </div>
+      {strain && !referenceReady && (
+        <div className="border-t border-amber-200 bg-amber-50 px-5 py-4 text-xs font-semibold leading-5 text-amber-950">
+          <p>JBrowse 2 and IGV.js require a published FASTA and generated FAI index. No reference files are currently published for {strain.strainName}.</p>
+          {isAdmin && <Link href="/admin" className="mt-2 inline-flex font-black uppercase text-orange-700 hover:text-orange-900">Open reference ingestion</Link>}
+        </div>
+      )}
     </aside>
   );
 }
