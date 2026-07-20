@@ -16,6 +16,15 @@ type BlastManifest = {
   strainListFiles: Record<string, string>;
 };
 
+export type BlastDatabaseStatus = {
+  state: 'EMPTY' | 'MISSING' | 'STALE' | 'BUILDING' | 'READY';
+  sourceReferenceCount: number;
+  indexedReferenceCount: number;
+  totalBases: number | null;
+  builtAt: string | null;
+  software: 'NCBI BLAST+';
+};
+
 export class BlastServiceError extends Error {
   constructor(public statusCode: number, message: string) {
     super(message);
@@ -24,6 +33,37 @@ export class BlastServiceError extends Error {
 
 let databaseBuild: Promise<BlastManifest> | null = null;
 let activeSearches = 0;
+
+export async function getBlastDatabaseStatus(prisma: PrismaClient): Promise<BlastDatabaseStatus> {
+  const references = await prisma.genomeReferenceFile.findMany({
+    where: {
+      kind: GenomeReferenceKind.FASTA,
+      status: GenomeReferenceStatus.PUBLISHED,
+      isPublic: true,
+      strainId: { not: null },
+    },
+    orderBy: { id: 'asc' },
+    select: { id: true, checksumSha256: true, updatedAt: true },
+  });
+  if (!references.length) return publicBlastStatus('EMPTY', 0, null);
+  if (databaseBuild) return publicBlastStatus('BUILDING', references.length, readBlastManifest());
+
+  const manifest = readBlastManifest();
+  if (!manifest) return publicBlastStatus('MISSING', references.length, null);
+  const expectedFingerprint = referenceFingerprint(references);
+  const ready = manifest.fingerprint === expectedFingerprint && blastDatabaseFilesExist(manifest.databasePrefix);
+  return publicBlastStatus(ready ? 'READY' : 'STALE', references.length, manifest);
+}
+
+export async function rebuildBlastDatabase(prisma: PrismaClient, maxReferenceBytes: number): Promise<BlastDatabaseStatus> {
+  if (!databaseBuild) {
+    databaseBuild = buildBlastDatabase(prisma, maxReferenceBytes).finally(() => {
+      databaseBuild = null;
+    });
+  }
+  const manifest = await databaseBuild;
+  return publicBlastStatus('READY', manifest.referenceCount, manifest);
+}
 
 export async function runBlastSearch(prisma: PrismaClient, options: {
   query: unknown;
@@ -130,16 +170,14 @@ async function buildBlastDatabase(prisma: PrismaClient, maxReferenceBytes: numbe
   });
   if (!references.length) throw new BlastServiceError(503, 'No approved reference FASTA files are available for BLAST yet.');
 
-  const fingerprint = createHash('sha256')
-    .update(references.map((reference) => `${reference.id}:${reference.checksumSha256}:${reference.updatedAt.toISOString()}`).join('|'))
-    .digest('hex');
-  const databaseRoot = path.resolve(process.env.BLAST_DB_DIR || path.join(process.cwd(), 'blastdb'));
+  const fingerprint = referenceFingerprint(references);
+  const databaseRoot = blastDatabaseRoot();
   mkdirSync(databaseRoot, { recursive: true });
-  const manifestPath = path.join(databaseRoot, 'manifest.json');
+  const manifestPath = blastManifestPath();
   if (existsSync(manifestPath)) {
     try {
       const existing = JSON.parse(readFileSync(manifestPath, 'utf8')) as BlastManifest;
-      const databaseExists = ['.njs', '.ndb', '.nhr'].some((extension) => existsSync(`${existing.databasePrefix}${extension}`));
+      const databaseExists = blastDatabaseFilesExist(existing.databasePrefix);
       if (existing.fingerprint === fingerprint && databaseExists && existing.strainListFiles) return existing;
     } catch {
       // A malformed or interrupted manifest is rebuilt from approved references.
@@ -159,7 +197,7 @@ async function buildBlastDatabase(prisma: PrismaClient, maxReferenceBytes: numbe
   }
   if (!combinedFasta) throw new BlastServiceError(503, 'Approved reference FASTA content is unavailable.');
 
-  const databasePrefix = path.join(databaseRoot, `bmga-${fingerprint.slice(0, 16)}`);
+  const databasePrefix = path.join(databaseRoot, `bmga-${fingerprint.slice(0, 16)}-${Date.now()}`);
   const sourcePath = `${databasePrefix}.fna`;
   writeFileSync(sourcePath, combinedFasta, { encoding: 'utf8', mode: 0o600 });
   await runProcess('makeblastdb', [
@@ -187,6 +225,47 @@ async function buildBlastDatabase(prisma: PrismaClient, maxReferenceBytes: numbe
   };
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), { encoding: 'utf8', mode: 0o600 });
   return manifest;
+}
+
+function referenceFingerprint(references: Array<{ id: string; checksumSha256: string; updatedAt: Date }>) {
+  return createHash('sha256')
+    .update(references.map((reference) => `${reference.id}:${reference.checksumSha256}:${reference.updatedAt.toISOString()}`).join('|'))
+    .digest('hex');
+}
+
+function blastDatabaseRoot() {
+  return path.resolve(process.env.BLAST_DB_DIR || path.join(process.cwd(), 'blastdb'));
+}
+
+function blastManifestPath() {
+  return path.join(blastDatabaseRoot(), 'manifest.json');
+}
+
+function readBlastManifest(): BlastManifest | null {
+  const manifestPath = blastManifestPath();
+  if (!existsSync(manifestPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as BlastManifest;
+    if (!parsed.fingerprint || !parsed.databasePrefix || !Number.isFinite(parsed.referenceCount) || !parsed.builtAt) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function blastDatabaseFilesExist(databasePrefix: string) {
+  return ['.njs', '.ndb', '.nhr'].some((extension) => existsSync(`${databasePrefix}${extension}`));
+}
+
+function publicBlastStatus(state: BlastDatabaseStatus['state'], sourceReferenceCount: number, manifest: BlastManifest | null): BlastDatabaseStatus {
+  return {
+    state,
+    sourceReferenceCount,
+    indexedReferenceCount: manifest?.referenceCount || 0,
+    totalBases: manifest?.totalBases ?? null,
+    builtAt: manifest?.builtAt || null,
+    software: 'NCBI BLAST+',
+  };
 }
 
 function normalizeQuery(value: unknown, maxQueryBases: number) {

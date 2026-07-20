@@ -1,6 +1,17 @@
-# BMGA EC2 + S3 Secure Deployment Guide
+# BMGA AWS Secure Deployment Guide
 
-This guide deploys BMGA on one EC2 instance, stores uploaded MAYA/result files in private S3, and uses RDS PostgreSQL for structured data. This is safer than running PostgreSQL inside the EC2 app instance.
+BMGA is already packaged as Docker services: frontend, backend, PostgreSQL, migrations, HTTPS reverse proxy, and private S3 object storage. Use one of the following deployment paths.
+
+## Choose A Deployment Path
+
+| Path | Use it when | Cost and trade-off |
+| --- | --- | --- |
+| **EC2 + S3 + RDS PostgreSQL** | Recommended production path for sensitive biological and user data | RDS costs more, but separates database failure, backup, and recovery concerns from the web host. |
+| **Single EC2 + S3 + Docker PostgreSQL** | Small pilot, limited budget, low traffic | Lowest recurring cost, but the app and database share one host. Use encrypted EBS, daily S3 backups, and plan a later RDS migration. |
+
+Do not deploy PostgreSQL to Lightsail or EC2 with port `5432` open to the internet. In both supported paths, PostgreSQL is private.
+
+The rest of this guide begins with the recommended EC2 + S3 + RDS route. The single-host alternative is documented in [Lowest-Cost Single-EC2 Route](#lowest-cost-single-ec2-route).
 
 ## Target Architecture
 
@@ -222,6 +233,62 @@ The database stores the object reference as an `s3://...` path. Downloads stream
 - CloudWatch log retention configured.
 - GuardDuty enabled.
 - AWS Backup or RDS automated backups enabled.
+
+## Lowest-Cost Single-EC2 Route
+
+This route keeps the application and PostgreSQL in separate Docker containers on one encrypted EC2 EBS volume. It is appropriate for a small production pilot, not for high availability. Uploaded organism, MAYA, FASTA, and GFF3 files remain private in S3; only relational application data stays on the PostgreSQL volume.
+
+1. Follow the S3, IAM role, EC2, DNS, and Docker installation steps above. Use an EC2 instance with at least 2 GB RAM, encrypted gp3 EBS (start at 40 GB), and no inbound ports except `80`, `443`, and restricted SSH or SSM.
+2. Create the host-only production environment file:
+
+```bash
+cd bmga/deploy/aws
+cp env.ec2.example .env.ec2
+chmod 600 .env.ec2
+nano .env.ec2
+```
+
+3. Generate values on the EC2 host. Use hex for `POSTGRES_PASSWORD` because it is embedded in the Docker-internal database URL:
+
+```bash
+openssl rand -hex 32
+openssl rand -base64 48
+openssl rand -base64 48
+```
+
+Put them into `.env.ec2` in this order: database password, `JWT_SECRET`, then `NEXTAUTH_SECRET`. Create a separate long admin password. Never use the local Docker defaults, example placeholders, or an AWS access key.
+
+4. Run the initial migration and first-admin seed:
+
+```bash
+cd ~/bmga
+docker compose --env-file deploy/aws/.env.ec2 -f deploy/aws/docker-compose.ec2.yml --profile migrate run --rm migrate
+```
+
+5. Start the application:
+
+```bash
+docker compose --env-file deploy/aws/.env.ec2 -f deploy/aws/docker-compose.ec2.yml up -d --build
+```
+
+6. Configure a daily encrypted database dump to the private S3 bucket. Install the AWS CLI on the EC2 host, then create a root crontab entry:
+
+```bash
+sudo chmod 700 deploy/aws/backup-postgres-to-s3.sh
+sudo crontab -e
+```
+
+```cron
+17 2 * * * cd /home/ubuntu/bmga && ./deploy/aws/backup-postgres-to-s3.sh >> /var/log/bmga-db-backup.log 2>&1
+```
+
+Use the EC2 instance role for this command. Do not configure `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` on the server. Test one backup manually before launch:
+
+```bash
+./deploy/aws/backup-postgres-to-s3.sh
+```
+
+7. Enable EBS snapshots or AWS Backup for the EC2 volume. S3 dumps protect the database contents; EBS snapshots also preserve the BLAST database volume and Caddy certificate state.
 
 ## 13. Routine Updates
 

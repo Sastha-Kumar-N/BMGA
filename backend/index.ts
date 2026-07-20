@@ -37,7 +37,7 @@ import {
   sendStoredFileInline,
 } from './services/objectStorage';
 import { prepareGenomeReference, type UploadableGenomeReferenceKind } from './services/genomeReferenceService';
-import { BlastServiceError, runBlastSearch } from './services/blastService';
+import { BlastServiceError, getBlastDatabaseStatus, rebuildBlastDatabase, runBlastSearch } from './services/blastService';
 import {
   getAmrSurveillanceInsights,
   getSurveillanceFilterOptions,
@@ -2480,6 +2480,79 @@ app.get('/api/admin/me', requireAdmin, async (req: AuthenticatedRequest, res: Re
   res.json({ ok: true, user: req.user });
 });
 
+app.get('/api/admin/blast-database', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    res.json(await getBlastDatabaseStatus(prisma));
+  } catch (error) {
+    logEvent('error', 'admin_blast_status_failed', { error: safeErrorMessage(error, 'BLAST status failed') });
+    res.status(500).json({ error: 'Failed to load BLAST database status' });
+  }
+});
+
+app.post('/api/admin/blast-database/rebuild', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const database = await rebuildBlastDatabase(prisma, MAX_GENOME_REFERENCE_BYTES);
+    await writeAdminLog(req.user?.userId, 'BLAST_DATABASE_REBUILT', 'GenomeReference', 'approved-fasta', {
+      result: 'success',
+      sourceReferenceCount: database.sourceReferenceCount,
+      indexedReferenceCount: database.indexedReferenceCount,
+      totalBases: database.totalBases,
+      builtAt: database.builtAt,
+    });
+    res.json({ message: 'BLAST database rebuilt from approved FASTA references', database });
+  } catch (error) {
+    const statusCode = error instanceof BlastServiceError ? error.statusCode : 500;
+    await writeAdminLog(req.user?.userId, 'BLAST_DATABASE_REBUILD_FAILED', 'GenomeReference', 'approved-fasta', {
+      result: 'failure',
+      statusCode,
+      reason: error instanceof BlastServiceError ? error.message : 'Build failed',
+    });
+    res.status(statusCode).json({ error: error instanceof BlastServiceError ? error.message : 'Failed to rebuild BLAST database' });
+  }
+});
+
+app.get('/api/admin/strains/:id/genome-references', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const strainId = parseNumericParam(req.params.id);
+  if (!strainId) return res.status(400).json({ error: 'Invalid strain id' });
+  try {
+    const strain = await prisma.strain.findUnique({
+      where: { id: strainId },
+      select: {
+        id: true,
+        organismId: true,
+        strainName: true,
+        assemblyAccession: true,
+        organism: { select: { scientificName: true } },
+        genomeReferences: {
+          orderBy: { kind: 'asc' },
+          select: {
+            id: true,
+            kind: true,
+            originalFileName: true,
+            contentType: true,
+            fileSizeBytes: true,
+            checksumSha256: true,
+            status: true,
+            isPublic: true,
+            validation: true,
+            createdAt: true,
+            updatedAt: true,
+            publishedAt: true,
+          },
+        },
+      },
+    });
+    if (!strain) return res.status(404).json({ error: 'Strain not found' });
+    res.json({
+      strain: { ...strain, genomeReferences: undefined },
+      references: strain.genomeReferences,
+    });
+  } catch (error) {
+    logEvent('error', 'admin_genome_reference_inventory_failed', { strainId, error: safeErrorMessage(error, 'Reference inventory failed') });
+    res.status(500).json({ error: 'Failed to load genome reference inventory' });
+  }
+});
+
 app.post('/api/admin/strains/:id/genome-references', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const strainId = parseNumericParam(req.params.id);
   if (!strainId) return res.status(400).json({ error: 'Invalid strain id' });
@@ -3561,7 +3634,7 @@ app.delete('/api/admin/blog-posts/:id', requireAdmin, async (req: AuthenticatedR
   }
 });
 
-app.patch('/api/admin/organisms/:id/metadata', requireAdmin, async (req: Request, res: Response) => {
+app.patch('/api/admin/organisms/:id/metadata', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const organismId = parseNumericParam(req.params.id);
   if (!organismId) {
     return res.status(400).json({ error: "Invalid organism id" });
@@ -3597,6 +3670,12 @@ app.patch('/api/admin/organisms/:id/metadata', requireAdmin, async (req: Request
         species,
         description,
       },
+    });
+    const changedFields = ['scientificName', 'displayName', 'taxonomyId', 'domain', 'phylum', 'className', 'orderName', 'family', 'genus', 'species', 'description']
+      .filter((field) => Object.prototype.hasOwnProperty.call(req.body || {}, field));
+    await writeAdminLog(req.user?.userId, 'PUBLISHED_ORGANISM_METADATA_UPDATED', 'Organism', String(organismId), {
+      scientificName: updated.scientificName,
+      changedFields,
     });
     res.json(updated);
   } catch (error) {
@@ -3720,7 +3799,7 @@ app.delete('/api/admin/organisms/:id', requireAdmin, async (req: AuthenticatedRe
   }
 });
 
-app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: Request, res: Response) => {
+app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const strainId = parseNumericParam(req.params.id);
   if (!strainId) {
     return res.status(400).json({ error: "Invalid strain id" });
@@ -3786,6 +3865,17 @@ app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: Request, 
         dataUseLimitations: textValue(dataUseLimitations, 2000),
         lastVerifiedAt: parseOptionalDate(lastVerifiedAt),
       },
+    });
+    const changedFields = [
+      'strainName', 'isolateName', 'strainCode', 'biosampleAccession', 'bioprojectAccession', 'assemblyAccession',
+      'sourceType', 'host', 'country', 'state', 'city', 'collectionDate', 'locationText', 'latitude', 'longitude',
+      'genomeStatus', 'genomeSize', 'gcContent', 'repoLink', 'metadata', 'surveillanceScope', 'evidenceBasis',
+      'submittingInstitution', 'dataSource', 'dataUseLimitations', 'lastVerifiedAt',
+    ].filter((field) => Object.prototype.hasOwnProperty.call(req.body || {}, field));
+    await writeAdminLog(req.user?.userId, 'PUBLISHED_STRAIN_METADATA_UPDATED', 'Strain', String(strainId), {
+      strainName: updated.strainName,
+      organismId: updated.organismId,
+      changedFields,
     });
     res.json(updated);
   } catch (error) {
@@ -3872,7 +3962,7 @@ app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req:
   }
 });
 
-app.post('/api/organisms', adminRateLimiter, requireAdmin, async (req: Request, res: Response) => {
+app.post('/api/organisms', adminRateLimiter, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { scientificName, displayName, taxonomyId, domain, phylum, className, orderName, family, genus, species, description } = req.body;
     if (!scientificName) {
@@ -3895,6 +3985,10 @@ app.post('/api/organisms', adminRateLimiter, requireAdmin, async (req: Request, 
       }
     });
     
+    await writeAdminLog(req.user?.userId, 'ORGANISM_CREATED_DIRECTLY', 'Organism', String(newOrg.id), {
+      scientificName: newOrg.scientificName,
+      taxonomyId: newOrg.taxonomyId,
+    });
     res.status(201).json(newOrg);
   } catch (error) {
     console.error("Organism Registration Error:", error);
@@ -4018,7 +4112,7 @@ app.get('/api/stats/gc-distribution', async (req: Request, res: Response) => {
 });
 
 // ─── REGISTER NEW STRAIN ─────────────────────────────────────────────────────
-app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Request, res: Response) => {
+app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const {
       organismId,
@@ -4050,10 +4144,15 @@ app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Request, re
       lastVerifiedAt,
     } = req.body;
     
+    const numericOrganismId = Number(organismId);
+    if (!Number.isInteger(numericOrganismId) || numericOrganismId <= 0 || typeof strainName !== 'string' || !strainName.trim()) {
+      return res.status(400).json({ error: 'A valid organismId and strainName are required' });
+    }
+
     const newStrain = await prisma.strain.create({
       data: {
-        organismId: Number(organismId),
-        strainName,
+        organismId: numericOrganismId,
+        strainName: strainName.trim(),
         isolateName,
         strainCode,
         biosampleAccession,
@@ -4082,6 +4181,11 @@ app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Request, re
       }
     });
     
+    await writeAdminLog(req.user?.userId, 'STRAIN_CREATED_DIRECTLY', 'Strain', String(newStrain.id), {
+      organismId: newStrain.organismId,
+      strainName: newStrain.strainName,
+      assemblyAccession: newStrain.assemblyAccession,
+    });
     res.status(201).json(newStrain);
   } catch (error) {
     console.error("Strain Registration Error:", error);
