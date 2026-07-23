@@ -92,7 +92,7 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
               aria-label="Open surveillance navigation"
               aria-expanded={mobileOpen}
               onClick={() => setMobileOpen(true)}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-white/15 text-white 2xl:hidden"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-white/15 text-white xl:hidden"
             >
               <Menu size={20} />
             </button>
@@ -100,28 +100,28 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
         </div>
       </header>
 
-      <div className={`mx-auto grid w-full max-w-[1600px] transition-[grid-template-columns] duration-200 ${desktopCollapsed ? '2xl:grid-cols-[76px_minmax(0,1fr)]' : '2xl:grid-cols-[240px_minmax(0,1fr)]'}`}>
-        <aside className={`hidden min-h-[calc(100vh-4rem)] border-r border-white/10 bg-[#07172f] text-white 2xl:block ${desktopCollapsed ? 'p-2' : 'p-4'}`}>
+      <div className={`grid w-full transition-[grid-template-columns] duration-200 ${desktopCollapsed ? 'lg:grid-cols-[76px_minmax(0,1fr)]' : 'lg:grid-cols-[76px_minmax(0,1fr)] xl:grid-cols-[232px_minmax(0,1fr)]'}`}>
+        <aside className={`hidden min-h-[calc(100vh-4rem)] border-r border-white/10 bg-[#07172f] text-white lg:block ${desktopCollapsed ? 'p-2' : 'p-2 xl:p-4'}`}>
           <div className="sticky top-20">
             <button
               type="button"
               onClick={() => setDesktopCollapsed((current) => !current)}
               aria-label={desktopCollapsed ? 'Expand surveillance sidebar' : 'Collapse surveillance sidebar'}
               aria-expanded={!desktopCollapsed}
-              className={`mb-3 inline-flex h-10 items-center justify-center border border-white/10 text-slate-300 transition hover:border-teal-400 hover:text-white ${desktopCollapsed ? 'w-full' : 'w-10'}`}
+              className={`mb-3 hidden h-10 items-center justify-center border border-white/10 text-slate-300 transition hover:border-teal-400 hover:text-white xl:inline-flex ${desktopCollapsed ? 'w-full' : 'w-10'}`}
             >
               {desktopCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </button>
-            <SurveillanceNavigation pathname={pathname} onNavigate={() => undefined} compact={desktopCollapsed} />
+            <SurveillanceNavigation pathname={pathname} onNavigate={() => undefined} compact={desktopCollapsed} desktop />
           </div>
         </aside>
-        <main id="surveillance-main" className="min-w-0 max-w-full overflow-hidden px-4 py-6 sm:px-6 lg:px-8">
+        <main id="surveillance-main" className="min-w-0 max-w-full px-4 py-6 sm:px-6 lg:px-7 2xl:px-8">
           {children}
         </main>
       </div>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-[70] 2xl:hidden">
+        <div className="fixed inset-0 z-[70] xl:hidden">
           <button className="absolute inset-0 bg-[#07172f]/70" aria-label="Close surveillance navigation" onClick={() => setMobileOpen(false)} />
           <aside className="relative h-full w-[min(320px,88vw)] overflow-y-auto bg-[#07172f] p-4 text-white shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
@@ -152,12 +152,12 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
   );
 }
 
-function SurveillanceNavigation({ pathname, onNavigate, compact = false }: { pathname: string; onNavigate: () => void; compact?: boolean }) {
+function SurveillanceNavigation({ pathname, onNavigate, compact = false, desktop = false }: { pathname: string; onNavigate: () => void; compact?: boolean; desktop?: boolean }) {
   return (
     <nav aria-label="Global surveillance navigation">
-      <div className={`mb-5 flex items-center text-teal-300 ${compact ? 'justify-center px-0' : 'gap-3 px-2'}`}>
+      <div className={`mb-5 flex items-center text-teal-300 ${compact ? 'justify-center px-0' : desktop ? 'justify-center px-0 xl:justify-start xl:gap-3 xl:px-2' : 'gap-3 px-2'}`}>
         <span className="flex h-10 w-10 items-center justify-center rounded-md bg-teal-500/10"><Dna size={20} /></span>
-        {!compact && <div>
+        {!compact && <div className={desktop ? 'hidden xl:block' : ''}>
           <p className="text-[10px] font-black uppercase tracking-widest">BMGA Surveillance</p>
           <p className="text-xs font-semibold text-slate-400">Global genomic signals</p>
         </div>}
@@ -177,16 +177,16 @@ function SurveillanceNavigation({ pathname, onNavigate, compact = false }: { pat
               href={link.href}
               onClick={onNavigate}
               aria-current={active ? 'page' : undefined}
-              aria-label={compact ? link.label : undefined}
-              title={compact ? link.label : undefined}
-              className={`flex min-h-11 items-center rounded-md border-l-4 py-2.5 text-sm font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300 ${compact ? 'justify-center px-0' : 'gap-3 px-3'} ${active ? 'border-teal-400 bg-teal-500/15 text-white' : 'border-transparent text-slate-300 hover:bg-white/5 hover:text-white'}`}
+              aria-label={link.label}
+              title={desktop ? link.label : undefined}
+              className={`flex min-h-11 items-center rounded-md border-l-4 py-2.5 text-sm font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300 ${compact ? 'justify-center px-0' : desktop ? 'justify-center px-0 xl:justify-start xl:gap-3 xl:px-3' : 'gap-3 px-3'} ${active ? 'border-teal-400 bg-teal-500/15 text-white' : 'border-transparent text-slate-300 hover:bg-white/5 hover:text-white'}`}
             >
-              <Icon size={18} /> <span className={compact ? 'sr-only' : ''}>{link.label}</span>
+              <Icon size={18} /> <span className={compact ? 'sr-only' : desktop ? 'hidden xl:inline' : ''}>{link.label}</span>
             </Link>
           );
         })}
       </div>
-      {!compact && <div className="mt-8 rounded-md border border-white/10 p-4">
+      {!compact && <div className={`mt-8 rounded-md border border-white/10 p-4 ${desktop ? 'hidden xl:block' : ''}`}>
         <div className="flex items-center gap-2 text-xs font-black text-white"><Microscope size={16} className="text-teal-300" /> Evidence note</div>
         <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">Pipeline detections are genotypic evidence unless linked phenotypic testing is explicitly recorded.</p>
       </div>}

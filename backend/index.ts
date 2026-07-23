@@ -31,6 +31,7 @@ import {
   deleteStoredFiles,
   readStoredTextFile,
   saveGenomeReferenceFile,
+  saveProfilePhotoFile,
   saveSubmissionResultFile,
   saveUploadedResultFile,
   sendStoredFileDownload,
@@ -58,6 +59,7 @@ const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || '6mb';
 const GENOME_REFERENCE_BODY_LIMIT = process.env.GENOME_REFERENCE_BODY_LIMIT || '32mb';
 const MAX_IMPORT_FILE_BYTES = Number(process.env.MAX_IMPORT_FILE_BYTES || 5 * 1024 * 1024);
 const MAX_GENOME_REFERENCE_BYTES = Number(process.env.MAX_GENOME_REFERENCE_BYTES || 25 * 1024 * 1024);
+const MAX_PROFILE_PHOTO_BYTES = Number(process.env.MAX_PROFILE_PHOTO_BYTES || 2 * 1024 * 1024);
 const MAX_BLAST_QUERY_BASES = numberEnv('MAX_BLAST_QUERY_BASES', 50_000);
 const BLAST_TIMEOUT_MS = numberEnv('BLAST_TIMEOUT_MS', 30_000);
 const BLAST_MAX_CONCURRENT = numberEnv('BLAST_MAX_CONCURRENT', 2);
@@ -355,6 +357,12 @@ const blastRateLimiter = rateLimit({
   max: numberEnv('BLAST_RATE_LIMIT_MAX', 20),
   key: (req) => `${getClientIp(req)}:${currentContext()?.userId || 'anonymous'}`,
 });
+const accountSecurityRateLimiter = rateLimit({
+  name: 'account-security',
+  windowMs: defaultRateLimitWindowMs,
+  max: numberEnv('ACCOUNT_SECURITY_RATE_LIMIT_MAX', 10),
+  key: (req) => `${getClientIp(req)}:${currentContext()?.userId || 'anonymous'}`,
+});
 
 async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
@@ -366,18 +374,21 @@ async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextF
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { userId?: string; role?: string };
+    const payload = jwt.verify(token, JWT_SECRET) as { userId?: string; role?: string; authVersion?: number };
     if (!payload.userId) {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, email: true, name: true, role: true, affiliation: true },
+      select: { id: true, email: true, name: true, role: true, affiliation: true, authVersion: true },
     });
 
     if (!user) {
       return res.status(401).json({ error: "Account no longer exists" });
+    }
+    if ((payload.authVersion ?? 0) !== user.authVersion) {
+      return res.status(401).json({ error: "Session expired. Please sign in again" });
     }
 
     req.user = {
@@ -613,6 +624,176 @@ function validatePassword(password: unknown) {
     return "Password must include uppercase, lowercase, number, and symbol characters";
   }
   return null;
+}
+
+const PROFILE_TITLES = new Set(["Dr.", "Prof.", "Mr.", "Ms."]);
+const PROFILE_GENDERS = new Set(["WOMAN", "MAN", "NON_BINARY", "PREFER_NOT_TO_SAY"]);
+const PROFILE_PHOTO_CONTENT_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/i;
+
+function optionalSecureUrl(value: unknown, label: string) {
+  const normalized = textValue(value, 500);
+  if (!normalized) return { value: null as string | null };
+
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== "https:") {
+      return { value: null as string | null, error: `${label} must use https://` };
+    }
+    return { value: parsed.toString() };
+  } catch {
+    return { value: null as string | null, error: `${label} must be a valid URL` };
+  }
+}
+
+function buildUserProfileData(body: Record<string, unknown>) {
+  const name = textValue(body.name, 160);
+  if (!name) return { error: "Full name is required" as const };
+
+  const title = textValue(body.title, 20) || null;
+  if (title && !PROFILE_TITLES.has(title)) {
+    return { error: "Title must be Dr., Prof., Mr., or Ms." as const };
+  }
+
+  const gender = textValue(body.gender, 40)?.toUpperCase() || null;
+  if (gender && !PROFILE_GENDERS.has(gender)) {
+    return { error: "Unsupported gender selection" as const };
+  }
+
+  let dateOfBirth: Date | null = null;
+  const rawDateOfBirth = textValue(body.dateOfBirth, 20);
+  if (rawDateOfBirth) {
+    const parsed = new Date(`${rawDateOfBirth}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDateOfBirth) || !Number.isFinite(parsed.getTime())) {
+      return { error: "Date of birth must be a valid date" as const };
+    }
+    if (parsed.getTime() > Date.now()) {
+      return { error: "Date of birth cannot be in the future" as const };
+    }
+    dateOfBirth = parsed;
+  }
+
+  const phone = textValue(body.phone, 40) || null;
+  if (phone && !/^[+()\d.\s-]{6,40}$/.test(phone)) {
+    return { error: "Phone number contains unsupported characters" as const };
+  }
+
+  const rawOrcid = textValue(body.orcidId, 80)
+    ?.replace(/^https:\/\/orcid\.org\//i, "")
+    .toUpperCase() || null;
+  if (rawOrcid && !ORCID_PATTERN.test(rawOrcid)) {
+    return { error: "ORCID ID must use the format 0000-0000-0000-0000" as const };
+  }
+
+  const googleScholar = optionalSecureUrl(body.googleScholarUrl, "Google Scholar profile");
+  if (googleScholar.error) return { error: googleScholar.error };
+  const linkedIn = optionalSecureUrl(body.linkedInUrl, "LinkedIn profile");
+  if (linkedIn.error) return { error: linkedIn.error };
+
+  return {
+    data: {
+      name,
+      profile: {
+        title,
+        gender,
+        dateOfBirth,
+        phone,
+        institutionalAddress: sanitizeContactText(body.institutionalAddress, 1000, true) || null,
+        country: textValue(body.country, 120) || null,
+        city: textValue(body.city, 120) || null,
+        designation: textValue(body.designation, 220) || null,
+        department: textValue(body.department, 220) || null,
+        institution: textValue(body.institution, 260) || null,
+        employmentStatus: textValue(body.employmentStatus, 120) || null,
+        highestDegree: textValue(body.highestDegree, 180) || null,
+        specialization: textValue(body.specialization, 260) || null,
+        researchInterests: sanitizeContactText(body.researchInterests, 3000, true) || null,
+        researchAreas: sanitizeContactText(body.researchAreas, 3000, true) || null,
+        keywords: sanitizeContactText(body.keywords, 1200, true) || null,
+        currentProjects: sanitizeContactText(body.currentProjects, 4000, true) || null,
+        orcidId: rawOrcid,
+        researcherId: textValue(body.researcherId, 160) || null,
+        scopusAuthorId: textValue(body.scopusAuthorId, 160) || null,
+        googleScholarUrl: googleScholar.value,
+        linkedInUrl: linkedIn.value,
+      },
+    },
+  };
+}
+
+function decodeProfilePhoto(body: Record<string, unknown>) {
+  const fileName = textValue(body.fileName, 180);
+  const contentType = textValue(body.contentType, 80)?.toLowerCase();
+  const rawContent = typeof body.fileContentBase64 === "string" ? body.fileContentBase64.trim() : "";
+
+  if (!fileName || !contentType || !rawContent) {
+    return { error: "Photo file name, content type, and content are required" as const };
+  }
+  if (!PROFILE_PHOTO_CONTENT_TYPES.has(contentType)) {
+    return { error: "Profile photo must be a JPEG, PNG, or WebP image" as const };
+  }
+
+  const dataUrlMatch = /^data:([^;]+);base64,(.+)$/s.exec(rawContent);
+  if (dataUrlMatch && dataUrlMatch[1].toLowerCase() !== contentType) {
+    return { error: "Profile photo content type does not match the uploaded file" as const };
+  }
+  const base64 = (dataUrlMatch ? dataUrlMatch[2] : rawContent).replace(/\s/g, "");
+  if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    return { error: "Profile photo encoding is invalid" as const };
+  }
+
+  const fileContent = Buffer.from(base64, "base64");
+  if (!fileContent.length || fileContent.length > MAX_PROFILE_PHOTO_BYTES) {
+    return { error: `Profile photo must be smaller than ${Math.floor(MAX_PROFILE_PHOTO_BYTES / 1024 / 1024)} MB` as const };
+  }
+
+  const isJpeg = fileContent[0] === 0xff && fileContent[1] === 0xd8 && fileContent[2] === 0xff;
+  const isPng = fileContent.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const isWebp = fileContent.subarray(0, 4).toString("ascii") === "RIFF"
+    && fileContent.subarray(8, 12).toString("ascii") === "WEBP";
+  const signatureMatches = (contentType === "image/jpeg" && isJpeg)
+    || (contentType === "image/png" && isPng)
+    || (contentType === "image/webp" && isWebp);
+  if (!signatureMatches) {
+    return { error: "Profile photo file signature is invalid" as const };
+  }
+
+  return { data: { fileName, contentType, fileContent } };
+}
+
+type UserWithProfile = Prisma.UserGetPayload<{ include: { profile: true } }>;
+
+function serializeUserProfile(user: UserWithProfile) {
+  const profile = user.profile;
+  return {
+    user: publicUser(user),
+    profile: {
+      title: profile?.title || "",
+      gender: profile?.gender || "",
+      dateOfBirth: profile?.dateOfBirth?.toISOString().slice(0, 10) || "",
+      phone: profile?.phone || "",
+      institutionalAddress: profile?.institutionalAddress || "",
+      country: profile?.country || "",
+      city: profile?.city || "",
+      designation: profile?.designation || "",
+      department: profile?.department || "",
+      institution: profile?.institution || "",
+      employmentStatus: profile?.employmentStatus || "",
+      highestDegree: profile?.highestDegree || "",
+      specialization: profile?.specialization || "",
+      researchInterests: profile?.researchInterests || "",
+      researchAreas: profile?.researchAreas || "",
+      keywords: profile?.keywords || "",
+      currentProjects: profile?.currentProjects || "",
+      orcidId: profile?.orcidId || "",
+      researcherId: profile?.researcherId || "",
+      scopusAuthorId: profile?.scopusAuthorId || "",
+      googleScholarUrl: profile?.googleScholarUrl || "",
+      linkedInUrl: profile?.linkedInUrl || "",
+      hasProfilePhoto: Boolean(profile?.profilePhotoPath),
+      profilePhotoUpdatedAt: profile?.updatedAt || null,
+    },
+  };
 }
 
 function publicUser(user: {
@@ -1627,7 +1808,7 @@ app.post('/api/auth/login', loginRateLimiter, async (req: Request, res: Response
       });
       return res.status(401).json({ error: "Invalid email or password" });
     }
-    const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ userId: user.id, role: user.role, authVersion: user.authVersion }, JWT_SECRET, { expiresIn: '24h' });
     await writeAdminLog(user.role === UserRole.ADMIN ? user.id : undefined, user.role === UserRole.ADMIN ? "ADMIN_LOGIN_SUCCESS" : "LOGIN_SUCCESS", "Auth", user.id, {
       result: "success",
       role: user.role,
@@ -1648,6 +1829,226 @@ app.get('/api/me', requireAuth, async (req: AuthenticatedRequest, res: Response)
   });
   if (!user) return res.status(404).json({ error: "User not found" });
   res.json({ user: publicUser(user), roleLabel: roleLabel(user.role) });
+});
+
+app.get('/api/me/profile', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user?.userId },
+      include: { profile: true },
+    });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(serializeUserProfile(user));
+  } catch (error) {
+    logEvent("error", "user_profile_fetch_failed", {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, "Profile fetch failed"),
+    });
+    res.status(500).json({ error: "Failed to load profile" });
+  }
+});
+
+app.put('/api/me/profile', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const payload = buildUserProfileData(req.body || {});
+    if ("error" in payload) {
+      return res.status(400).json({ error: payload.error });
+    }
+
+    const user = await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: req.user?.userId },
+        data: { name: payload.data.name },
+      });
+      await tx.userProfile.upsert({
+        where: { userId: req.user?.userId || "" },
+        create: {
+          userId: req.user?.userId || "",
+          ...payload.data.profile,
+        },
+        update: payload.data.profile,
+      });
+      return tx.user.findUniqueOrThrow({
+        where: { id: req.user?.userId },
+        include: { profile: true },
+      });
+    });
+
+    await writeAdminLog(req.user?.userId, "USER_PROFILE_UPDATED", "User", req.user?.userId, {
+      result: "success",
+    });
+    res.json({ message: "Profile updated", ...serializeUserProfile(user) });
+  } catch (error) {
+    logEvent("error", "user_profile_update_failed", {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, "Profile update failed"),
+    });
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
+app.post('/api/me/password', requireAuth, accountSecurityRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentPassword = req.body.currentPassword;
+    const newPassword = req.body.newPassword;
+    const confirmPassword = req.body.confirmPassword;
+    if (typeof currentPassword !== "string" || !currentPassword) {
+      return res.status(400).json({ error: "Current password is required" });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: "New password confirmation does not match" });
+    }
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) return res.status(400).json({ error: passwordError });
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user?.userId },
+      select: { id: true, passwordHash: true },
+    });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      await writeAdminLog(req.user?.userId, "USER_PASSWORD_CHANGE_FAILED", "User", user.id, {
+        result: "failure",
+        reason: "current_password_incorrect",
+      });
+      return res.status(400).json({ error: "Current password is incorrect" });
+    }
+    if (await bcrypt.compare(newPassword, user.passwordHash)) {
+      return res.status(400).json({ error: "New password must be different from the current password" });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        authVersion: { increment: 1 },
+      },
+    });
+    await writeAdminLog(req.user?.userId, "USER_PASSWORD_CHANGED", "User", user.id, {
+      result: "success",
+    });
+    res.json({
+      message: "Password changed. Sign in again with your new password.",
+      reauthenticate: true,
+    });
+  } catch (error) {
+    logEvent("error", "user_password_change_failed", {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, "Password change failed"),
+    });
+    res.status(500).json({ error: "Failed to change password" });
+  }
+});
+
+app.post('/api/me/profile-photo', requireAuth, accountSecurityRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  let savedPath: string | null = null;
+  try {
+    const payload = decodeProfilePhoto(req.body || {});
+    if ("error" in payload) {
+      return res.status(400).json({ error: payload.error });
+    }
+
+    const existing = await prisma.userProfile.findUnique({
+      where: { userId: req.user?.userId || "" },
+      select: { profilePhotoPath: true },
+    });
+    savedPath = await saveProfilePhotoFile({
+      userId: req.user?.userId || "",
+      ...payload.data,
+    });
+    const profile = await prisma.userProfile.upsert({
+      where: { userId: req.user?.userId || "" },
+      create: {
+        userId: req.user?.userId || "",
+        profilePhotoPath: savedPath,
+        profilePhotoName: payload.data.fileName,
+        profilePhotoContentType: payload.data.contentType,
+        profilePhotoSizeBytes: payload.data.fileContent.length,
+      },
+      update: {
+        profilePhotoPath: savedPath,
+        profilePhotoName: payload.data.fileName,
+        profilePhotoContentType: payload.data.contentType,
+        profilePhotoSizeBytes: payload.data.fileContent.length,
+      },
+      select: { updatedAt: true },
+    });
+
+    if (existing?.profilePhotoPath && existing.profilePhotoPath !== savedPath) {
+      await deleteStoredFiles([existing.profilePhotoPath]);
+    }
+    await writeAdminLog(req.user?.userId, "USER_PROFILE_PHOTO_UPDATED", "User", req.user?.userId, {
+      result: "success",
+      contentType: payload.data.contentType,
+      fileSizeBytes: payload.data.fileContent.length,
+      storageDriver: configuredStorageDriver(),
+    });
+    res.status(201).json({
+      message: "Profile photo updated",
+      hasProfilePhoto: true,
+      profilePhotoUpdatedAt: profile.updatedAt,
+    });
+  } catch (error) {
+    if (savedPath) await deleteStoredFiles([savedPath]);
+    logEvent("error", "user_profile_photo_update_failed", {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, "Profile photo update failed"),
+    });
+    res.status(500).json({ error: "Failed to update profile photo" });
+  }
+});
+
+app.get('/api/me/profile-photo', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const profile = await prisma.userProfile.findUnique({
+      where: { userId: req.user?.userId || "" },
+      select: {
+        profilePhotoPath: true,
+        profilePhotoName: true,
+        profilePhotoContentType: true,
+      },
+    });
+    if (!profile?.profilePhotoPath) return res.status(404).json({ error: "Profile photo not found" });
+    await sendStoredFileInline(req, res, profile.profilePhotoPath, {
+      fileName: profile.profilePhotoName || "profile-photo",
+      contentType: profile.profilePhotoContentType || "application/octet-stream",
+      cacheControl: "private, no-store",
+    });
+  } catch (error) {
+    if (!res.headersSent) res.status(500).json({ error: "Failed to load profile photo" });
+  }
+});
+
+app.delete('/api/me/profile-photo', requireAuth, accountSecurityRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const profile = await prisma.userProfile.findUnique({
+      where: { userId: req.user?.userId || "" },
+      select: { profilePhotoPath: true },
+    });
+    if (!profile?.profilePhotoPath) return res.status(404).json({ error: "Profile photo not found" });
+
+    const cleanup = await deleteStoredFiles([profile.profilePhotoPath]);
+    if (cleanup.failed) {
+      return res.status(503).json({ error: "Stored photo cleanup failed; profile data was preserved" });
+    }
+    await prisma.userProfile.update({
+      where: { userId: req.user?.userId || "" },
+      data: {
+        profilePhotoPath: null,
+        profilePhotoName: null,
+        profilePhotoContentType: null,
+        profilePhotoSizeBytes: null,
+      },
+    });
+    await writeAdminLog(req.user?.userId, "USER_PROFILE_PHOTO_REMOVED", "User", req.user?.userId, {
+      result: "success",
+    });
+    res.json({ message: "Profile photo removed" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to remove profile photo" });
+  }
 });
 
 app.post('/api/contact-messages', contactRateLimiter, async (req: Request, res: Response) => {
@@ -2480,6 +2881,55 @@ app.get('/api/admin/me', requireAdmin, async (req: AuthenticatedRequest, res: Re
   res.json({ ok: true, user: req.user });
 });
 
+app.get('/api/admin/cockpit-summary', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [
+      registeredUsers,
+      pendingUploads,
+      underReviewUploads,
+      pendingBlogPosts,
+      unreadMessages,
+      publishedUploads,
+      auditEvents,
+      totalOrganisms,
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.organismUpload.count({ where: { status: ApprovalStatus.PENDING } }),
+      prisma.organismUpload.count({ where: { status: ApprovalStatus.UNDER_REVIEW } }),
+      prisma.blogPost.count({ where: { status: ApprovalStatus.PENDING } }),
+      prisma.contactMessage.count({ where: { status: ContactMessageStatus.UNREAD, archived: false } }),
+      prisma.organismUpload.count({
+        where: {
+          status: ApprovalStatus.APPROVED,
+          publishedOrganismId: { not: null },
+          publishedStrainId: { not: null },
+        },
+      }),
+      prisma.adminLog.count(),
+      prisma.organism.count(),
+    ]);
+
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({
+      registeredUsers,
+      pendingUploads,
+      underReviewUploads,
+      pendingBlogPosts,
+      unreadMessages,
+      publishedUploads,
+      auditEvents,
+      totalOrganisms,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    logEvent("error", "admin_cockpit_summary_failed", {
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, "Admin cockpit summary failed"),
+    });
+    res.status(500).json({ error: "Failed to load admin cockpit summary" });
+  }
+});
+
 app.get('/api/admin/blast-database', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     res.json(await getBlastDatabaseStatus(prisma));
@@ -2854,7 +3304,10 @@ app.post('/api/admin/users/:id/password-reset', requireAdmin, async (req: Authen
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
       where: { id: targetUserId },
-      data: { passwordHash: hashedPassword },
+      data: {
+        passwordHash: hashedPassword,
+        authVersion: { increment: 1 },
+      },
     });
 
     await writeAdminLog(req.user?.userId, "USER_PASSWORD_RESET", "User", targetUserId, {
@@ -2888,6 +3341,11 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req: AuthenticatedReques
         email: true,
         name: true,
         role: true,
+        profile: {
+          select: {
+            profilePhotoPath: true,
+          },
+        },
         _count: {
           select: {
             organismUploads: true,
@@ -2952,6 +3410,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req: AuthenticatedReques
     const cleanup = await deleteStoredFiles([
       ...submissionFiles.map((file) => file.storagePath),
       ...pendingGenomeReferences.map((file) => file.storagePath),
+      ...(targetUser.profile?.profilePhotoPath ? [targetUser.profile.profilePhotoPath] : []),
     ]);
     if (cleanup.failed > 0) {
       await writeAdminLog(req.user?.userId, 'USER_DELETE_ATTEMPT', 'User', targetUserId, {
@@ -2961,7 +3420,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req: AuthenticatedReques
         cleanup,
         statusCode: 503,
       });
-      return res.status(503).json({ error: 'User submission file cleanup failed; the user record was preserved' });
+      return res.status(503).json({ error: 'User-owned file cleanup failed; the user record was preserved' });
     }
 
     await prisma.$transaction(async (tx) => {

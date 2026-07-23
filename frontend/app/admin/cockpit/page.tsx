@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AlertCircle, ArrowRight, BookOpenCheck, ClipboardCheck, Database, FileCheck2, Globe2, History, Inbox, MessageSquare, Plus, Search, ShieldCheck, Trash2, UserCog, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -67,6 +67,18 @@ type AuditLogResponse = {
   total: number;
 };
 
+type CockpitSummary = {
+  registeredUsers: number;
+  pendingUploads: number;
+  underReviewUploads: number;
+  pendingBlogPosts: number;
+  unreadMessages: number;
+  publishedUploads: number;
+  auditEvents: number;
+  totalOrganisms: number;
+  generatedAt: string;
+};
+
 type DeleteDialogState = {
   title: string;
   body: string;
@@ -86,6 +98,7 @@ export default function AdminCockpitPage() {
   const [strains, setStrains] = useState<StrainRecord[]>([]);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [auditEvents, setAuditEvents] = useState(0);
+  const [summary, setSummary] = useState<CockpitSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
   const [blogSearch, setBlogSearch] = useState('');
@@ -103,13 +116,27 @@ export default function AdminCockpitPage() {
     Authorization: `Bearer ${session?.user?.accessToken || ''}`,
   }), [session?.user?.accessToken]);
 
+  const loadSummary = useCallback(async () => {
+    if (!session?.user?.accessToken) return;
+    const response = await fetch(apiPath('/admin/cockpit-summary'), {
+      headers,
+      cache: 'no-store',
+    });
+    if (!response.ok) return;
+    const data = await response.json() as CockpitSummary;
+    setSummary(data);
+    setUserCount(data.registeredUsers);
+    setUnreadMessages(data.unreadMessages);
+    setAuditEvents(data.auditEvents);
+  }, [headers, session?.user?.accessToken]);
+
   useEffect(() => {
     if (!session?.user?.accessToken) return;
     let active = true;
     async function load() {
       setLoading(true);
       try {
-        const [usersRes, uploadsRes, postsRes, messagesRes, auditRes, organismsRes, strainsRes] = await Promise.all([
+        const [usersRes, uploadsRes, postsRes, messagesRes, auditRes, organismsRes, strainsRes, summaryRes] = await Promise.all([
           fetch(apiPath('/admin/users'), { headers, cache: 'no-store' }),
           fetch(apiPath('/admin/organism-uploads'), { headers, cache: 'no-store' }),
           fetch(apiPath('/admin/blog-posts'), { headers, cache: 'no-store' }),
@@ -117,8 +144,9 @@ export default function AdminCockpitPage() {
           fetch(apiPath('/admin/audit-logs?limit=1'), { headers, cache: 'no-store' }),
           fetch(apiPath('/organisms'), { cache: 'no-store' }),
           fetch(apiPath('/strains'), { cache: 'no-store' }),
+          fetch(apiPath('/admin/cockpit-summary'), { headers, cache: 'no-store' }),
         ]);
-        const [usersData, uploadsData, postsData, messagesData, auditData, organismsData, strainsData] = await Promise.all([
+        const [usersData, uploadsData, postsData, messagesData, auditData, organismsData, strainsData, summaryData] = await Promise.all([
           usersRes.ok ? usersRes.json() as Promise<AdminUserRecord[]> : Promise.resolve([]),
           uploadsRes.ok ? uploadsRes.json() as Promise<StatusRecord[]> : Promise.resolve([]),
           postsRes.ok ? postsRes.json() as Promise<AdminBlogPostRecord[]> : Promise.resolve([]),
@@ -126,6 +154,7 @@ export default function AdminCockpitPage() {
           auditRes.ok ? auditRes.json() as Promise<AuditLogResponse> : Promise.resolve({ total: 0 }),
           organismsRes.ok ? organismsRes.json() as Promise<OrganismRecord[]> : Promise.resolve([]),
           strainsRes.ok ? strainsRes.json() as Promise<StrainRecord[]> : Promise.resolve([]),
+          summaryRes.ok ? summaryRes.json() as Promise<CockpitSummary> : Promise.resolve(null),
         ]);
         if (!active) return;
         setUserCount(usersData.length);
@@ -136,6 +165,12 @@ export default function AdminCockpitPage() {
         setStrains(strainsData);
         setUnreadMessages(messagesData.unreadCount || 0);
         setAuditEvents(auditData.total || 0);
+        if (summaryData) {
+          setSummary(summaryData);
+          setUserCount(summaryData.registeredUsers);
+          setUnreadMessages(summaryData.unreadMessages);
+          setAuditEvents(summaryData.auditEvents);
+        }
       } catch (error) {
         console.error('Admin cockpit load failed', error);
       } finally {
@@ -148,8 +183,25 @@ export default function AdminCockpitPage() {
     };
   }, [headers, refreshKey, session?.user?.accessToken]);
 
-  const pendingUploads = uploads.filter((item) => item.status === 'PENDING').length;
-  const pendingPosts = posts.filter((item) => item.status === 'PENDING').length;
+  useEffect(() => {
+    if (!session?.user?.accessToken) return;
+    const interval = window.setInterval(() => void loadSummary(), 10_000);
+    const refreshVisibleSummary = () => {
+      if (document.visibilityState === 'visible') void loadSummary();
+    };
+    window.addEventListener('focus', refreshVisibleSummary);
+    document.addEventListener('visibilitychange', refreshVisibleSummary);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshVisibleSummary);
+      document.removeEventListener('visibilitychange', refreshVisibleSummary);
+    };
+  }, [loadSummary, session?.user?.accessToken]);
+
+  const pendingUploads = summary?.pendingUploads ?? uploads.filter((item) => item.status === 'PENDING').length;
+  const underReviewUploads = summary?.underReviewUploads ?? uploads.filter((item) => item.status === 'UNDER_REVIEW').length;
+  const pendingPosts = summary?.pendingBlogPosts ?? posts.filter((item) => item.status === 'PENDING').length;
+  const publishedUploads = summary?.publishedUploads ?? uploads.filter((item) => item.status === 'APPROVED').length;
   const adminCount = users.filter((user) => user.role === 'ADMIN').length;
   const visibleUsers = users.filter((user) => searchable(`${user.name} ${user.email} ${user.role}`, userSearch)).slice(0, 8);
   const visiblePosts = posts.filter((post) => searchable(`${post.title} ${post.author?.name || ''} ${post.author?.email || ''} ${post.status}`, blogSearch)).slice(0, 8);
@@ -171,7 +223,7 @@ export default function AdminCockpitPage() {
       tone: 'text-teal-700 bg-teal-50',
       actions: [
         { href: '/admin', title: 'Add Organism', body: 'Open the organism and MAYA ingestion portal.', icon: Plus },
-        { href: '/admin/uploads', title: 'Review Uploads', body: `${pendingUploads} submissions awaiting review.`, icon: ClipboardCheck },
+        { href: '/admin/uploads', title: 'Review Uploads', body: `${pendingUploads} pending and ${underReviewUploads} under review.`, icon: ClipboardCheck },
       ],
     },
     {
@@ -273,7 +325,7 @@ export default function AdminCockpitPage() {
           <MetricCard icon={ClipboardCheck} label="Pending Uploads" value={loading ? '...' : String(pendingUploads)} href="/admin/uploads" />
           <MetricCard icon={BookOpenCheck} label="Pending Blog Posts" value={loading ? '...' : String(pendingPosts)} href="/admin/blogs" />
           <MetricCard icon={Inbox} label="Contact Messages" value={loading ? '...' : String(unreadMessages)} href="/admin/contact-messages" />
-          <MetricCard icon={Database} label="Published Uploads" value={loading ? '...' : String(uploads.filter((item) => item.status === 'APPROVED').length)} href="/dashboard" />
+          <MetricCard icon={Database} label="Published Uploads" value={loading ? '...' : String(publishedUploads)} href="/dashboard" />
           <MetricCard icon={History} label="Audit Events" value={loading ? '...' : String(auditEvents)} href="/admin/audit-logs" />
         </section>
 

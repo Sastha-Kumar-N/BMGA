@@ -66,6 +66,17 @@ export async function saveGenomeReferenceFile(options: {
     : saveGenomeReferenceFileToDisk(options);
 }
 
+export async function saveProfilePhotoFile(options: {
+  userId: string;
+  fileName: string;
+  contentType: string;
+  fileContent: Buffer;
+}) {
+  return storageDriver === 's3'
+    ? saveProfilePhotoFileToS3(options)
+    : saveProfilePhotoFileToDisk(options);
+}
+
 export async function readStoredTextFile(filePath: string, maxBytes: number) {
   if (isS3Uri(filePath)) {
     if (!s3Client) throw new Error('S3 storage is not configured on this server.');
@@ -366,6 +377,56 @@ async function saveGenomeReferenceFileToS3(options: {
       ownerType: options.ownerType,
       ownerId: safeOwner,
       referenceKind: options.kind,
+      originalFileName: safeFile,
+    },
+  }));
+
+  return `s3://${s3Bucket}/${key}`;
+}
+
+function saveProfilePhotoFileToDisk(options: {
+  userId: string;
+  fileName: string;
+  contentType: string;
+  fileContent: Buffer;
+}) {
+  const safeUserId = safePathPart(options.userId);
+  const safeFile = safePathPart(options.fileName);
+  const uploadDir = path.resolve(localUploadRoot, 'profile-photos', safeUserId);
+  if (!isPathInside(localUploadRoot, uploadDir)) throw new Error('Invalid profile photo upload path');
+
+  mkdirSync(uploadDir, { recursive: true });
+  const outputPath = path.join(uploadDir, `${Date.now()}-${randomUUID()}-${safeFile}`);
+  writeFileSync(outputPath, options.fileContent);
+  return outputPath;
+}
+
+async function saveProfilePhotoFileToS3(options: {
+  userId: string;
+  fileName: string;
+  contentType: string;
+  fileContent: Buffer;
+}) {
+  if (!s3Client) throw new Error('S3 storage client is not configured.');
+
+  const safeUserId = safePathPart(options.userId);
+  const safeFile = safePathPart(options.fileName);
+  const key = [
+    s3Prefix,
+    'profile-photos',
+    safeUserId,
+    `${Date.now()}-${randomUUID()}-${safeFile}`,
+  ].filter(Boolean).join('/');
+
+  await s3Client.send(new PutObjectCommand({
+    Bucket: s3Bucket,
+    Key: key,
+    Body: options.fileContent,
+    ContentType: options.contentType,
+    ServerSideEncryption: s3KmsKeyId ? 'aws:kms' : 'AES256',
+    SSEKMSKeyId: s3KmsKeyId || undefined,
+    Metadata: {
+      userId: safeUserId,
       originalFileName: safeFile,
     },
   }));

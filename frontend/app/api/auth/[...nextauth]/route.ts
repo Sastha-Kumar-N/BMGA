@@ -33,6 +33,12 @@ type LoginResponse = {
   };
 };
 
+type CurrentUserResponse = {
+  user?: LoginResponse["user"];
+};
+
+const ROLE_REFRESH_INTERVAL_MS = 5_000;
+
 const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -72,12 +78,44 @@ const authOptions: NextAuthOptions = {
     })
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id;
         token.accessToken = user.accessToken;
         token.role = user.role;
         token.affiliation = user.affiliation;
+        token.roleSyncedAt = Date.now();
+        token.authSyncError = undefined;
+      }
+
+      const shouldRefreshCurrentUser = Boolean(
+        token.accessToken
+        && (trigger === "update" || !token.roleSyncedAt || Date.now() - token.roleSyncedAt >= ROLE_REFRESH_INTERVAL_MS),
+      );
+      if (shouldRefreshCurrentUser) {
+        try {
+          const response = await fetch(serverApiUrl("/me"), {
+            headers: { Authorization: `Bearer ${token.accessToken}` },
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            token.authSyncError = response.status === 401 ? "SESSION_EXPIRED" : "ROLE_SYNC_FAILED";
+          } else {
+            const current = await response.json() as CurrentUserResponse;
+            if (current.user) {
+              token.id = current.user.id;
+              token.name = current.user.name;
+              token.email = current.user.email;
+              token.role = current.user.role;
+              token.affiliation = current.user.affiliation;
+              token.authSyncError = undefined;
+            }
+          }
+        } catch {
+          token.authSyncError = "ROLE_SYNC_FAILED";
+        } finally {
+          token.roleSyncedAt = Date.now();
+        }
       }
       return token;
     },
@@ -88,6 +126,7 @@ const authOptions: NextAuthOptions = {
         session.user.role = token.role;
         session.user.affiliation = token.affiliation;
       }
+      session.authSyncError = token.authSyncError;
       return session;
     }
   },

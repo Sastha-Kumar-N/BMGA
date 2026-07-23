@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertCircle,
   ArrowUpRight,
   BookOpenText,
   CheckCircle2,
@@ -15,6 +16,7 @@ import {
   LayoutDashboard,
   LogOut,
   ShieldCheck,
+  UserRound,
   XCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -46,42 +48,56 @@ export default function AccountPage() {
   const [uploads, setUploads] = useState<UserUpload[]>([]);
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const headers = useMemo(() => ({
     Authorization: `Bearer ${session?.user?.accessToken || ''}`,
   }), [session?.user?.accessToken]);
   const canCreateBlog = ['CONTRIBUTOR', 'MODERATOR', 'ADMIN'].includes(session?.user?.role || '');
 
+  const load = useCallback(async (silent = false) => {
+    if (!session?.user?.accessToken) return;
+    if (!silent) setLoading(true);
+    try {
+      const [uploadRes, postRes] = await Promise.all([
+        fetch(apiPath('/me/uploads'), { headers, cache: 'no-store' }),
+        fetch(apiPath('/me/blog-posts'), { headers, cache: 'no-store' }),
+      ]);
+      if (!uploadRes.ok || !postRes.ok) {
+        const failedResponse = !uploadRes.ok ? uploadRes : postRes;
+        const failure = await failedResponse.json().catch(() => ({})) as { error?: string };
+        throw new Error(failure.error || 'Account activity could not be loaded');
+      }
+      const [uploadData, postData] = await Promise.all([
+        uploadRes.json() as Promise<UserUpload[]>,
+        postRes.json() as Promise<BlogPost[]>,
+      ]);
+      setUploads(uploadData);
+      setPosts(postData);
+      setLoadError('');
+    } catch (error) {
+      console.error('Account dashboard load failed', error);
+      setLoadError(error instanceof Error ? error.message : 'Account activity could not be loaded');
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [headers, session?.user?.accessToken]);
+
   useEffect(() => {
     if (!session?.user?.accessToken) return;
-    let active = true;
-
-    async function load() {
-      setLoading(true);
-      try {
-        const [uploadRes, postRes] = await Promise.all([
-          fetch(apiPath('/me/uploads'), { headers, cache: 'no-store' }),
-          fetch(apiPath('/me/blog-posts'), { headers, cache: 'no-store' }),
-        ]);
-        const [uploadData, postData] = await Promise.all([
-          uploadRes.ok ? uploadRes.json() as Promise<UserUpload[]> : Promise.resolve([]),
-          postRes.ok ? postRes.json() as Promise<BlogPost[]> : Promise.resolve([]),
-        ]);
-        if (!active) return;
-        setUploads(uploadData);
-        setPosts(postData);
-      } catch (error) {
-        console.error('Account dashboard load failed', error);
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
     void load();
-    return () => {
-      active = false;
+    const interval = window.setInterval(() => void load(true), 15_000);
+    const refreshVisibleAccount = () => {
+      if (document.visibilityState === 'visible') void load(true);
     };
-  }, [headers, session?.user?.accessToken]);
+    window.addEventListener('focus', refreshVisibleAccount);
+    document.addEventListener('visibilitychange', refreshVisibleAccount);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshVisibleAccount);
+      document.removeEventListener('visibilitychange', refreshVisibleAccount);
+    };
+  }, [load, session?.user?.accessToken]);
 
   if (status === 'loading') {
     return <AccountShell><p className="text-sm font-black uppercase tracking-widest text-orange-500">Loading account session...</p></AccountShell>;
@@ -102,10 +118,17 @@ export default function AccountPage() {
         </button>
       </header>
 
-      <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
+      {loadError && (
+        <div role="alert" className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">
+          <AlertCircle size={19} /> {loadError}
+        </div>
+      )}
+
+      <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         <ActionCard href="/dashboard" icon={LayoutDashboard} title="Main Dashboard" body="Open the India atlas and public organism database." />
         <ActionCard href="/surveillance" icon={Globe2} title="Global Surveillance" body="Explore worldwide strain records, AMR insights, and data freshness." />
         <ActionCard href="/submit-organism" icon={FilePlus2} title="Submit Organism" body="Upload organism and genome metadata for admin approval." />
+        <ActionCard href="/account/profile" icon={UserRound} title="Profile & Security" body="Maintain your professional profile, photo, identifiers, and password." />
         <ActionCard
           href={canCreateBlog ? '/blog/create' : '/blog'}
           icon={BookOpenText}

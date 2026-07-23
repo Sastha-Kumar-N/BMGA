@@ -84,8 +84,10 @@ model User {
   name                    String
   affiliation             UserAffiliation           @default(RESEARCH)
   role                    UserRole                  @default(STUDENT)
+  authVersion             Int                       @default(0)
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
+  profile                 UserProfile?
   organismUploads         OrganismUpload[]          @relation("UserOrganismUploads")
   reviewedOrganismUploads OrganismUpload[]          @relation("ReviewedOrganismUploads")
   submissionStatusHistory SubmissionStatusHistory[] @relation("SubmissionStatusActors")
@@ -93,6 +95,45 @@ model User {
   blogPosts               BlogPost[]                @relation("UserBlogPosts")
   reviewedBlogPosts       BlogPost[]                @relation("ReviewedBlogPosts")
   adminLogs               AdminLog[]                @relation("AdminLogs")
+}
+
+model UserProfile {
+  id                         String   @id @default(uuid())
+  userId                     String   @unique
+  title                      String?
+  gender                     String?
+  dateOfBirth                DateTime?
+  phone                      String?
+  institutionalAddress       String?
+  country                    String?
+  city                       String?
+  designation                String?
+  department                 String?
+  institution                String?
+  employmentStatus           String?
+  highestDegree              String?
+  specialization             String?
+  researchInterests          String?
+  researchAreas              String?
+  keywords                   String?
+  currentProjects            String?
+  orcidId                    String?
+  researcherId               String?
+  scopusAuthorId             String?
+  googleScholarUrl           String?
+  linkedInUrl                String?
+  profilePhotoPath           String?
+  profilePhotoName           String?
+  profilePhotoContentType    String?
+  profilePhotoSizeBytes      Int?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([country])
+  @@index([institution])
+  @@index([orcidId])
 }
 
 model Organism {

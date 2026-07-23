@@ -147,6 +147,7 @@ async function main() {
     where: { email: adminEmail },
     update: {
       passwordHash: hashedAdminPassword,
+      authVersion: { increment: 1 },
       name: 'MAYA Administrator',
       role: UserRole.ADMIN,
     },
@@ -174,6 +175,7 @@ async function main() {
       where: { email: 'admin@genomics.com' },
       update: {
         passwordHash: hashedPassword,
+        authVersion: { increment: 1 },
         name: 'System Admin',
         role: UserRole.RESEARCHER,
       },
