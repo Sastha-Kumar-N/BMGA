@@ -5,6 +5,7 @@ import L from 'leaflet';
 import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
 import type { LatLngBoundsExpression, LatLngExpression } from 'leaflet';
 import { AlertCircle, MapPin, RefreshCcw } from 'lucide-react';
+import { filterIndianStrains } from './surveillance/geography';
 
 export type HomeMapStrain = {
   id: number;
@@ -45,12 +46,6 @@ function numericValue(value: number | string | null | undefined) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isIndiaCoordinate(latitude: number, longitude: number, country?: string | null) {
-  const countryLabel = (country || '').toLowerCase();
-  const looksLikeIndia = !countryLabel || countryLabel.includes('india');
-  return looksLikeIndia && latitude >= 6 && latitude <= 38 && longitude >= 67 && longitude <= 98;
 }
 
 function createHomeMarkerIcon(sourceType?: string | null) {
@@ -108,12 +103,11 @@ function MapViewport({ points }: { points: HomeMapPoint[] }) {
 
 export default function HomeIndiaMap({ strains, loading = false, error = null }: HomeIndiaMapProps) {
   const points = useMemo<HomeMapPoint[]>(() => (
-    strains
+    filterIndianStrains(strains)
       .map((strain) => {
         const latitudeValue = numericValue(strain.latitude);
         const longitudeValue = numericValue(strain.longitude);
         if (latitudeValue === null || longitudeValue === null) return null;
-        if (!isIndiaCoordinate(latitudeValue, longitudeValue, strain.country)) return null;
 
         return {
           ...strain,

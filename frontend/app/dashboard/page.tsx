@@ -33,6 +33,8 @@ import {
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { filterIndianStrains } from '../components/surveillance/geography';
+import HomeNavigation from '../components/home/HomeNavigation';
 import { apiPath } from '../lib/api-client';
 import type { AtlasStrain } from '../components/IndiaOrganismAtlas';
 
@@ -285,11 +287,13 @@ export default function Dashboard() {
     };
   }, []);
 
+  const indiaStrains = useMemo(() => filterIndianStrains(strains), [strains]);
+
   const filteredStrains = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return strains;
+    if (!normalizedQuery) return indiaStrains;
 
-    return strains.filter((strain) => {
+    return indiaStrains.filter((strain) => {
       const searchable = [
         strain.organism?.scientificName,
         strain.strainName,
@@ -304,14 +308,14 @@ export default function Dashboard() {
 
       return searchable.includes(normalizedQuery);
     });
-  }, [query, strains]);
+  }, [indiaStrains, query]);
 
   const selectedStrain = useMemo(() => (
     (selectedStrainId ? strains.find((strain) => strain.id.toString() === selectedStrainId) : null)
     || filteredStrains[0]
-    || strains[0]
+    || indiaStrains[0]
     || null
-  ), [filteredStrains, selectedStrainId, strains]);
+  ), [filteredStrains, indiaStrains, selectedStrainId, strains]);
 
   const activeResultStrains = useMemo(() => (
     selectedStrainId && selectedStrain ? [selectedStrain] : filteredStrains
@@ -359,7 +363,9 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f6f8fb] text-slate-900 selection:bg-orange-500/20">
+    <>
+      <HomeNavigation genomeHref="/dashboard#genome-toolset" />
+      <div className="flex min-h-screen bg-[#f6f8fb] text-slate-900 selection:bg-orange-500/20">
       <aside className={`hidden shrink-0 flex-col border-r border-white/10 bg-[#0B1B3A] py-4 text-white transition-[width,padding] duration-200 xl:flex ${sidebarCollapsed ? 'w-20 px-2' : 'w-72 px-5'}`}>
         <button
           type="button"
@@ -562,7 +568,8 @@ export default function Dashboard() {
           <div className="flex-1 bg-[#138808]" />
         </div>
       </main>
-    </div>
+      </div>
+    </>
   );
 }
 

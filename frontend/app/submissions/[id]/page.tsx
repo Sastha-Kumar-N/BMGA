@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { signIn, useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, Dna, Home, LayoutDashboard, Lock, UserRound } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Dna, Edit3, Home, LayoutDashboard, Lock, Save, UserRound } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 import { BRAND_FULL_NAME } from '../../lib/brand';
 import BrandLogo from '../../components/BrandLogo';
@@ -73,15 +73,99 @@ type Submission = {
   reviewedBy?: Person | null;
 };
 
+type SubmissionDraft = {
+  scientificName: string;
+  displayName: string;
+  taxonomyId: string;
+  domain: string;
+  phylum: string;
+  className: string;
+  orderName: string;
+  family: string;
+  genus: string;
+  species: string;
+  description: string;
+  strainName: string;
+  isolateName: string;
+  strainCode: string;
+  sourceType: string;
+  host: string;
+  country: string;
+  state: string;
+  city: string;
+  collectionDate: string;
+  locationText: string;
+  latitude: string;
+  longitude: string;
+  biosampleAccession: string;
+  bioprojectAccession: string;
+  assemblyAccession: string;
+  genomeStatus: string;
+  genomeSize: string;
+  gcContent: string;
+  repoLink: string;
+  metadata: string;
+  surveillanceScope: string;
+  evidenceBasis: string;
+  submittingInstitution: string;
+  dataSource: string;
+  dataUseLimitations: string;
+  lastVerifiedAt: string;
+};
+
+const EMPTY_DRAFT: SubmissionDraft = {
+  scientificName: '',
+  displayName: '',
+  taxonomyId: '',
+  domain: '',
+  phylum: '',
+  className: '',
+  orderName: '',
+  family: '',
+  genus: '',
+  species: '',
+  description: '',
+  strainName: '',
+  isolateName: '',
+  strainCode: '',
+  sourceType: '',
+  host: '',
+  country: '',
+  state: '',
+  city: '',
+  collectionDate: '',
+  locationText: '',
+  latitude: '',
+  longitude: '',
+  biosampleAccession: '',
+  bioprojectAccession: '',
+  assemblyAccession: '',
+  genomeStatus: '',
+  genomeSize: '',
+  gcContent: '',
+  repoLink: '',
+  metadata: '{}',
+  surveillanceScope: '',
+  evidenceBasis: '',
+  submittingInstitution: '',
+  dataSource: '',
+  dataUseLimitations: '',
+  lastVerifiedAt: '',
+};
+
 export default function UserSubmissionDetailPage() {
   const params = useParams<{ id: string }>();
   const { data: session, status } = useSession();
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [message, setMessage] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; text: string }>({ type: 'idle', text: '' });
+  const [draft, setDraft] = useState<SubmissionDraft>(EMPTY_DRAFT);
+  const [editState, setEditState] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; text: string }>({ type: 'idle', text: '' });
 
   const headers = useMemo(() => ({
     Authorization: `Bearer ${session?.user?.accessToken || ''}`,
   }), [session?.user?.accessToken]);
+
+  const isEditable = Boolean(submission && (submission.status === 'PENDING' || submission.status === 'NEEDS_CHANGES'));
 
   const load = useCallback(async () => {
     if (!session?.user?.accessToken || !params.id) return;
@@ -91,6 +175,7 @@ export default function UserSubmissionDetailPage() {
       const data = await response.json().catch(() => ({})) as { submission?: Submission; error?: string };
       if (!response.ok || !data.submission) throw new Error(data.error || 'Failed to load submission');
       setSubmission(data.submission);
+      setDraft(submissionToDraft(data.submission));
       setMessage({ type: 'idle', text: '' });
     } catch (error) {
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to load submission' });
@@ -100,6 +185,33 @@ export default function UserSubmissionDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (submission) {
+      setDraft(submissionToDraft(submission));
+    }
+  }, [submission]);
+
+  const saveEdits = async () => {
+    if (!session?.user?.accessToken || !submission || !isEditable) return;
+    setEditState({ type: 'loading', text: 'Saving submission updates...' });
+    try {
+      const response = await fetch(apiPath(`/submissions/${submission.id}`), {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.user.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(draftToPayload(draft)),
+      });
+      const data = await response.json().catch(() => ({})) as { submission?: Submission; error?: string; message?: string };
+      if (!response.ok) throw new Error(data.error || 'Failed to save submission updates');
+      setEditState({ type: 'success', text: data.message || 'Submission updated and returned to the review queue.' });
+      await load();
+    } catch (error) {
+      setEditState({ type: 'error', text: error instanceof Error ? error.message : 'Failed to save submission updates' });
+    }
+  };
 
   if (status === 'loading') {
     return <Shell><p className="text-sm font-black uppercase tracking-widest text-orange-500">Checking account session...</p></Shell>;
@@ -167,6 +279,65 @@ export default function UserSubmissionDetailPage() {
               </div>
             </section>
 
+            {isEditable && (
+              <section className="rounded-2xl border border-orange-200 bg-orange-50/60 p-6 shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-orange-100 pb-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Submitter edits</p>
+                    <h2 className="mt-1 text-xl font-black tracking-tight text-[#0B1B3A]">Update submission and resubmit</h2>
+                    <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">Edit the fields below, save your changes, and the submission returns to the review queue.</p>
+                  </div>
+                  <button type="button" onClick={saveEdits} disabled={editState.type === 'loading'} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#0B1B3A] px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:bg-orange-500 disabled:opacity-50">
+                    <Save size={15} /> {editState.type === 'loading' ? 'Saving...' : 'Save changes'}
+                  </button>
+                </div>
+
+                {editState.type !== 'idle' && (
+                  <div className={`mt-4 flex items-center gap-3 rounded-xl p-4 text-sm font-bold ${editState.type === 'error' ? 'border border-red-200 bg-red-50 text-red-700' : 'border border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                    {editState.type === 'error' ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}
+                    {editState.text}
+                  </div>
+                )}
+
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <EditField label="Scientific Name" value={draft.scientificName} onChange={(value) => setDraft({ ...draft, scientificName: value })} required />
+                  <EditField label="Display Name" value={draft.displayName} onChange={(value) => setDraft({ ...draft, displayName: value })} />
+                  <EditField label="Strain Name" value={draft.strainName} onChange={(value) => setDraft({ ...draft, strainName: value })} required />
+                  <EditField label="Isolate Name" value={draft.isolateName} onChange={(value) => setDraft({ ...draft, isolateName: value })} />
+                  <EditField label="Taxonomy ID" value={draft.taxonomyId} onChange={(value) => setDraft({ ...draft, taxonomyId: value })} />
+                  <EditField label="Domain" value={draft.domain} onChange={(value) => setDraft({ ...draft, domain: value })} />
+                  <EditField label="Phylum" value={draft.phylum} onChange={(value) => setDraft({ ...draft, phylum: value })} />
+                  <EditField label="Class" value={draft.className} onChange={(value) => setDraft({ ...draft, className: value })} />
+                  <EditField label="Order" value={draft.orderName} onChange={(value) => setDraft({ ...draft, orderName: value })} />
+                  <EditField label="Family" value={draft.family} onChange={(value) => setDraft({ ...draft, family: value })} />
+                  <EditField label="Genus" value={draft.genus} onChange={(value) => setDraft({ ...draft, genus: value })} />
+                  <EditField label="Species" value={draft.species} onChange={(value) => setDraft({ ...draft, species: value })} />
+                  <EditField label="Source" value={draft.sourceType} onChange={(value) => setDraft({ ...draft, sourceType: value })} />
+                  <EditField label="Host / Isolation Source" value={draft.host} onChange={(value) => setDraft({ ...draft, host: value })} />
+                  <EditField label="Country" value={draft.country} onChange={(value) => setDraft({ ...draft, country: value })} />
+                  <EditField label="State" value={draft.state} onChange={(value) => setDraft({ ...draft, state: value })} />
+                  <EditField label="City" value={draft.city} onChange={(value) => setDraft({ ...draft, city: value })} />
+                  <EditField label="Collection Date" type="date" value={draft.collectionDate} onChange={(value) => setDraft({ ...draft, collectionDate: value })} />
+                  <EditField label="Location Text" value={draft.locationText} onChange={(value) => setDraft({ ...draft, locationText: value })} />
+                  <EditField label="Latitude" value={draft.latitude} onChange={(value) => setDraft({ ...draft, latitude: value })} />
+                  <EditField label="Longitude" value={draft.longitude} onChange={(value) => setDraft({ ...draft, longitude: value })} />
+                  <EditField label="Genome Size" value={draft.genomeSize} onChange={(value) => setDraft({ ...draft, genomeSize: value })} />
+                  <EditField label="GC Content" value={draft.gcContent} onChange={(value) => setDraft({ ...draft, gcContent: value })} />
+                  <EditField label="Genome Status" value={draft.genomeStatus} onChange={(value) => setDraft({ ...draft, genomeStatus: value })} />
+                  <EditField label="BioSample Accession" value={draft.biosampleAccession} onChange={(value) => setDraft({ ...draft, biosampleAccession: value })} />
+                  <EditField label="BioProject Accession" value={draft.bioprojectAccession} onChange={(value) => setDraft({ ...draft, bioprojectAccession: value })} />
+                  <EditField label="Assembly Accession" value={draft.assemblyAccession} onChange={(value) => setDraft({ ...draft, assemblyAccession: value })} />
+                  <EditField label="Repository Link" value={draft.repoLink} onChange={(value) => setDraft({ ...draft, repoLink: value })} />
+                  <EditField label="Submitting Institution" value={draft.submittingInstitution} onChange={(value) => setDraft({ ...draft, submittingInstitution: value })} />
+                  <EditField label="Data Source" value={draft.dataSource} onChange={(value) => setDraft({ ...draft, dataSource: value })} />
+                  <EditField label="Last Verified" type="date" value={draft.lastVerifiedAt} onChange={(value) => setDraft({ ...draft, lastVerifiedAt: value })} />
+                </div>
+                <EditArea label="Description / Notes" value={draft.description} onChange={(value) => setDraft({ ...draft, description: value })} />
+                <EditArea label="Data Use Limitations" value={draft.dataUseLimitations} onChange={(value) => setDraft({ ...draft, dataUseLimitations: value })} />
+                <EditArea label="Metadata JSON" value={draft.metadata} onChange={(value) => setDraft({ ...draft, metadata: value })} rows={6} monospace />
+              </section>
+            )}
+
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-xl font-black tracking-tight">Metadata</h2>
               <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -201,6 +372,12 @@ export default function UserSubmissionDetailPage() {
           </section>
 
           <aside className="space-y-6">
+            {isEditable && (
+              <section className="rounded-2xl border border-orange-200 bg-orange-50 p-5 shadow-sm">
+                <h2 className="flex items-center gap-2 text-xl font-black tracking-tight"><Edit3 className="text-orange-500" size={20} /> Resubmission flow</h2>
+                <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">After saving changes, the submission is sent back to the review queue and the previous review decision is cleared.</p>
+              </section>
+            )}
             <SubmissionTimeline history={submission.statusHistory || []} />
             <ReviewerNotesPanel notes={submission.reviewerNotes || []} />
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -264,4 +441,130 @@ function metadataValue(metadata: Submission['metadata'], keys: string[]) {
 
 function formatStatus(status: SubmissionStatus) {
   return String(status).toLowerCase().replace(/_/g, ' ');
+}
+
+function submissionToDraft(submission: Submission): SubmissionDraft {
+  return {
+    ...EMPTY_DRAFT,
+    scientificName: submission.scientificName || '',
+    displayName: submission.displayName || '',
+    taxonomyId: submission.taxonomyId ? String(submission.taxonomyId) : '',
+    domain: submission.domain || '',
+    phylum: submission.phylum || '',
+    className: submission.className || '',
+    orderName: submission.orderName || '',
+    family: submission.family || '',
+    genus: submission.genus || '',
+    species: submission.species || '',
+    description: submission.description || '',
+    strainName: submission.strainName || '',
+    isolateName: submission.isolateName || '',
+    strainCode: submission.strainCode || '',
+    sourceType: submission.sourceType || '',
+    host: submission.host || '',
+    country: submission.country || '',
+    state: submission.state || '',
+    city: submission.city || '',
+    collectionDate: submission.collectionDate ? String(submission.collectionDate).slice(0, 10) : '',
+    locationText: submission.locationText || '',
+    latitude: submission.latitude !== null && submission.latitude !== undefined ? String(submission.latitude) : '',
+    longitude: submission.longitude !== null && submission.longitude !== undefined ? String(submission.longitude) : '',
+    biosampleAccession: submission.biosampleAccession || '',
+    bioprojectAccession: submission.bioprojectAccession || '',
+    assemblyAccession: submission.assemblyAccession || '',
+    genomeStatus: submission.genomeStatus || '',
+    genomeSize: submission.genomeSize !== null && submission.genomeSize !== undefined ? String(submission.genomeSize) : '',
+    gcContent: submission.gcContent !== null && submission.gcContent !== undefined ? String(submission.gcContent) : '',
+    repoLink: submission.repoLink || '',
+    metadata: JSON.stringify(submission.metadata || {}, null, 2),
+    surveillanceScope: 'N/A',
+    evidenceBasis: 'N/A',
+    submittingInstitution: '',
+    dataSource: '',
+    dataUseLimitations: '',
+    lastVerifiedAt: '',
+  };
+}
+
+function draftToPayload(draft: SubmissionDraft) {
+  return {
+    scientificName: draft.scientificName,
+    displayName: draft.displayName,
+    taxonomyId: draft.taxonomyId,
+    domain: draft.domain,
+    phylum: draft.phylum,
+    className: draft.className,
+    orderName: draft.orderName,
+    family: draft.family,
+    genus: draft.genus,
+    species: draft.species,
+    description: draft.description,
+    strainName: draft.strainName,
+    isolateName: draft.isolateName,
+    strainCode: draft.strainCode,
+    sourceType: draft.sourceType,
+    host: draft.host,
+    country: draft.country,
+    state: draft.state,
+    city: draft.city,
+    collectionDate: draft.collectionDate,
+    locationText: draft.locationText,
+    latitude: draft.latitude,
+    longitude: draft.longitude,
+    biosampleAccession: draft.biosampleAccession,
+    bioprojectAccession: draft.bioprojectAccession,
+    assemblyAccession: draft.assemblyAccession,
+    genomeStatus: draft.genomeStatus,
+    genomeSize: draft.genomeSize,
+    gcContent: draft.gcContent,
+    repoLink: draft.repoLink,
+    metadata: draft.metadata,
+    surveillanceScope: draft.surveillanceScope,
+    evidenceBasis: draft.evidenceBasis,
+    submittingInstitution: draft.submittingInstitution,
+    dataSource: draft.dataSource,
+    dataUseLimitations: draft.dataUseLimitations,
+    lastVerifiedAt: draft.lastVerifiedAt,
+  };
+}
+
+function EditField({ label, value, onChange, type = 'text', required = false }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+      <input
+        required={required}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-11 w-full rounded-xl border border-orange-100 bg-white px-4 text-sm font-bold outline-none transition focus:border-orange-500 focus:bg-white"
+      />
+    </label>
+  );
+}
+
+function EditArea({ label, value, onChange, rows = 4, monospace = false }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  rows?: number;
+  monospace?: boolean;
+}) {
+  return (
+    <label className="mt-4 block">
+      <span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+      <textarea
+        rows={rows}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={`w-full rounded-xl border border-orange-100 bg-white px-4 py-3 text-sm font-bold outline-none transition focus:border-orange-500 focus:bg-white ${monospace ? 'font-mono' : ''}`}
+      />
+    </label>
+  );
 }

@@ -21,13 +21,13 @@ type GenomeReferenceAttachments = Partial<Record<'FASTA' | 'GFF3', File>>;
 
 const MAYA_TOOLS = [
   'abricate', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
-  'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'multiqc',
+  'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'mlst', 'multiqc',
   'prokka', 'quast', 'rnlst', 'spades', 'trf', 'trnascan',
 ];
 
-const MAX_RESULT_FILE_BYTES = 5 * 1024 * 1024;
-const RESULT_FILE_PATTERN = /\.(tsv|csv|json|txt)$/i;
-const MAX_GENOME_REFERENCE_BYTES = 25 * 1024 * 1024;
+const MAX_RESULT_FILE_BYTES = 10 * 1024 * 1024;
+const RESULT_FILE_PATTERN = /\.(tsv|csv|json|txt|html?|dat|fasta)$/i;
+const MAX_GENOME_REFERENCE_BYTES = 10 * 1024 * 1024;
 const REFERENCE_FILE_PATTERNS = {
   FASTA: /\.(fa|fna|fasta)$/i,
   GFF3: /\.(gff|gff3)$/i,
@@ -174,11 +174,11 @@ export function OrganismSubmissionForm({ surveillanceMode = false }: { surveilla
   const attachMayaFile = (file?: File) => {
     if (!file) return;
     if (!RESULT_FILE_PATTERN.test(file.name)) {
-      setStatus({ type: 'error', message: 'MAYA result files must use TSV, CSV, JSON, or TXT format.' });
+      setStatus({ type: 'error', message: 'MAYA result files must use TSV, CSV, JSON, TXT, HTML, DAT, or FASTA format.' });
       return;
     }
     if (file.size > MAX_RESULT_FILE_BYTES) {
-      setStatus({ type: 'error', message: 'Each MAYA result file must be 5 MB or smaller.' });
+      setStatus({ type: 'error', message: 'Each MAYA result file must be 10 MB or smaller.' });
       return;
     }
     if (mayaAttachments.some((attachment) => attachment.toolName === pendingTool)) {
@@ -197,7 +197,7 @@ export function OrganismSubmissionForm({ surveillanceMode = false }: { surveilla
       return;
     }
     if (file.size > MAX_GENOME_REFERENCE_BYTES) {
-      setStatus({ type: 'error', message: 'Each genome reference file must be 25 MB or smaller.' });
+      setStatus({ type: 'error', message: 'Each genome reference file must be 10 MB or smaller.' });
       return;
     }
     setGenomeReferences((current) => ({ ...current, [kind]: file }));
@@ -291,7 +291,7 @@ export function OrganismSubmissionForm({ surveillanceMode = false }: { surveilla
                     <FileCode2 className={kind === 'FASTA' ? 'text-teal-700' : 'text-orange-600'} size={21} />
                     <div>
                       <p className="text-sm font-black">{kind === 'FASTA' ? 'Reference FASTA' : 'Genome Annotation GFF3'}</p>
-                      <p className="mt-1 text-xs font-semibold text-slate-500">{kind === 'FASTA' ? '.fa, .fna, or .fasta' : '.gff or .gff3'} · 25 MB maximum</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">{kind === 'FASTA' ? '.fa, .fna, or .fasta' : '.gff or .gff3'} · 10 MB maximum</p>
                     </div>
                   </div>
                   {file ? (
@@ -317,8 +317,8 @@ export function OrganismSubmissionForm({ surveillanceMode = false }: { surveilla
             <label className="block">
               <span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Result File</span>
               <span className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-teal-400 bg-white px-4 text-xs font-black uppercase text-teal-800 transition hover:bg-teal-50">
-                <UploadCloud size={17} /> Attach TSV, CSV, JSON, or TXT
-                <input type="file" className="sr-only" accept=".tsv,.csv,.json,.txt" onChange={(event) => { attachMayaFile(event.target.files?.[0]); event.currentTarget.value = ''; }} />
+                <UploadCloud size={17} /> Attach TSV, CSV, JSON, TXT, HTML, DAT, or FASTA
+                <input type="file" className="sr-only" accept=".tsv,.csv,.json,.txt,.html,.htm,.dat,.fasta,.fa,.fna" onChange={(event) => { attachMayaFile(event.target.files?.[0]); event.currentTarget.value = ''; }} />
               </span>
             </label>
           </div>

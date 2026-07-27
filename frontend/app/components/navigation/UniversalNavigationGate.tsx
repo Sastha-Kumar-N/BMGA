@@ -5,6 +5,7 @@ import HomeNavigation from '../home/HomeNavigation';
 
 function ownsNavigation(pathname: string) {
   if (pathname === '/' || pathname === '/blog') return true;
+  if (pathname.startsWith('/dashboard')) return true;
   if (pathname.startsWith('/surveillance')) return true;
   if (pathname.startsWith('/team') || pathname.startsWith('/about')) return true;
   if (pathname.startsWith('/fair') || pathname.startsWith('/privacy') || pathname.startsWith('/cookies')) return true;

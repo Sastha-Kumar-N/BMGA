@@ -34,6 +34,7 @@ import HomeNavigation from './HomeNavigation';
 import { useHomePortalData } from './useHomePortalData';
 import type { HomeStrain } from './types';
 import { evidenceLabel, formatDate } from '../surveillance/types';
+import { filterIndianStrains } from '../surveillance/geography';
 
 const HomeGlobalMap = dynamic(() => import('./HomeGlobalMap'), {
   ssr: false,
@@ -76,10 +77,6 @@ function formatGc(value?: number | string | null) {
   return parsed === null ? 'N/A' : `${parsed.toFixed(2)}%`;
 }
 
-function isIndiaStrain(strain: HomeStrain) {
-  return strain.surveillanceScope === 'NATIONAL' || /india/i.test(strain.country || '');
-}
-
 function hasReference(strain: HomeStrain) {
   return Boolean(strain.referenceKinds?.includes('FASTA') && strain.referenceKinds.includes('FAI'));
 }
@@ -118,7 +115,7 @@ export default function HomePortal() {
   const [registryQuery, setRegistryQuery] = useState('');
 
   const overview = data.overview;
-  const indiaStrains = useMemo(() => data.strains.filter(isIndiaStrain), [data.strains]);
+  const indiaStrains = useMemo(() => filterIndianStrains(data.strains), [data.strains]);
   const referenceStrains = useMemo(() => data.strains.filter(hasReference), [data.strains]);
   const firstReferenceStrain = referenceStrains[0] || null;
   const firstStrain = data.strains[0] || null;

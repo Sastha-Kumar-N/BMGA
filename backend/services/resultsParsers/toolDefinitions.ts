@@ -39,6 +39,7 @@ export function normalizeToolName(toolName: string) {
   if (key === "island_path") return "islandpath";
   if (key === "trnascan_se" || key === "trnascanse") return "trnascan";
   if (key === "rmlst" || key === "rn_lsts") return "rnlst";
+  if (key === "mlst" || key === "m_lst") return "rnlst";
   if (key === "antismash") return "antismash";
 
   return key;

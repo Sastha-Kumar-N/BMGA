@@ -602,10 +602,11 @@ function isPathInside(root: string, candidate: string) {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
-function contentTypeForFileName(fileName: string) {
+export function contentTypeForFileName(fileName: string) {
   const extension = path.extname(fileName).toLowerCase();
   if (['.fa', '.fna', '.fasta', '.fai'].includes(extension)) return 'text/plain; charset=utf-8';
   if (['.gff', '.gff3'].includes(extension)) return 'text/gff3; charset=utf-8';
+  if (['.html', '.htm'].includes(extension)) return 'text/html; charset=utf-8';
   if (extension === '.json') return 'application/json';
   if (extension === '.csv') return 'text/csv';
   if (extension === '.tsv') return 'text/tab-separated-values';

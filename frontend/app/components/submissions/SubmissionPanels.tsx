@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { CheckCircle2, Clock3, Download, FileText, LoaderCircle, MessageSquareText, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Download, ExternalLink, FileText, LoaderCircle, MessageSquareText, XCircle } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 
 export type SubmissionStatus =
@@ -51,6 +51,7 @@ export type SubmissionFile = {
   errorMessage?: string | null;
   ingestedAt?: string | null;
   downloadPath?: string | null;
+  viewPath?: string | null;
 };
 
 export function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
@@ -123,6 +124,7 @@ export function SubmissionFilesPanel({ files, title = 'Uploaded Files', eyebrow 
               <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
                 <FileText size={14} /> {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : 'No date'}
               </span>
+              {file.viewPath && <SecureFileView file={file} />}
               {file.downloadPath && <SecureFileDownload file={file} />}
             </div>
           </div>
@@ -167,6 +169,39 @@ function SecureFileDownload({ file }: { file: SubmissionFile }) {
   return (
     <button type="button" onClick={download} disabled={state === 'loading' || !session?.user?.accessToken} title={state === 'error' ? 'Download failed. Try again.' : `Download ${file.fileName}`} className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 ${state === 'error' ? 'border-red-200 text-red-700' : 'border-teal-200 text-teal-700 hover:bg-teal-50'}`}>
       {state === 'loading' ? <LoaderCircle className="animate-spin" size={14} /> : <Download size={14} />} {state === 'error' ? 'Retry' : 'Download'}
+    </button>
+  );
+}
+
+function SecureFileView({ file }: { file: SubmissionFile }) {
+  const { data: session } = useSession();
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  const view = async () => {
+    if (!file.viewPath || !session?.user?.accessToken) return;
+    setState('loading');
+    try {
+      const response = await fetch(apiPath(file.viewPath), {
+        headers: { Authorization: `Bearer ${session.user.accessToken}` },
+      });
+      if (!response.ok) throw new Error('View failed');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!win) {
+        URL.revokeObjectURL(url);
+        throw new Error('Popup blocked');
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      setState('idle');
+    } catch {
+      setState('error');
+    }
+  };
+
+  return (
+    <button type="button" onClick={view} disabled={state === 'loading' || !session?.user?.accessToken} title={state === 'error' ? 'View failed. Try again.' : `View ${file.fileName}`} className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 ${state === 'error' ? 'border-red-200 text-red-700' : 'border-orange-200 text-orange-700 hover:bg-orange-50'}`}>
+      {state === 'loading' ? <LoaderCircle className="animate-spin" size={14} /> : <ExternalLink size={14} />} {state === 'error' ? 'Retry view' : 'View'}
     </button>
   );
 }

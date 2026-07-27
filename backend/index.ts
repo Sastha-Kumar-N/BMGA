@@ -29,6 +29,7 @@ import { normalizeToolName, TOOL_KEYS } from './services/resultsParsers/toolDefi
 import {
   configuredStorageDriver,
   deleteStoredFiles,
+  contentTypeForFileName,
   readStoredTextFile,
   saveGenomeReferenceFile,
   saveProfilePhotoFile,
@@ -57,8 +58,8 @@ const ENABLE_REQUEST_LOGGING = process.env.ENABLE_REQUEST_LOGGING !== 'false';
 const PORT = Number(process.env.PORT || 3001);
 const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || '6mb';
 const GENOME_REFERENCE_BODY_LIMIT = process.env.GENOME_REFERENCE_BODY_LIMIT || '32mb';
-const MAX_IMPORT_FILE_BYTES = Number(process.env.MAX_IMPORT_FILE_BYTES || 5 * 1024 * 1024);
-const MAX_GENOME_REFERENCE_BYTES = Number(process.env.MAX_GENOME_REFERENCE_BYTES || 25 * 1024 * 1024);
+const MAX_IMPORT_FILE_BYTES = Number(process.env.MAX_IMPORT_FILE_BYTES || 10 * 1024 * 1024);
+const MAX_GENOME_REFERENCE_BYTES = Number(process.env.MAX_GENOME_REFERENCE_BYTES || 10 * 1024 * 1024);
 const MAX_PROFILE_PHOTO_BYTES = Number(process.env.MAX_PROFILE_PHOTO_BYTES || 2 * 1024 * 1024);
 const MAX_BLAST_QUERY_BASES = numberEnv('MAX_BLAST_QUERY_BASES', 50_000);
 const BLAST_TIMEOUT_MS = numberEnv('BLAST_TIMEOUT_MS', 30_000);
@@ -1288,6 +1289,7 @@ function buildSubmissionResponse<T extends {
     updatedAt: file.updatedAt,
     ingestedAt: file.ingestedAt,
     downloadPath: `/submissions/${upload.id}/files/${file.id}/download`,
+    viewPath: `/submissions/${upload.id}/files/${file.id}/view`,
   }));
 
   return {
@@ -1316,9 +1318,9 @@ function buildSubmissionResponse<T extends {
 function validateImportFile(fileName: unknown, fileContent: unknown) {
   const normalizedFileName = textValue(fileName, 240) || "results.tsv";
   const extension = path.extname(normalizedFileName).toLowerCase();
-  const allowedExtensions = new Set(['.tsv', '.csv', '.json', '.txt']);
+  const allowedExtensions = new Set(['.tsv', '.csv', '.json', '.txt', '.html', '.htm', '.dat', '.fasta', '.fa', '.fna']);
   if (!allowedExtensions.has(extension)) {
-    return { error: "Unsupported import file type. Use TSV, CSV, JSON, or TXT." as const };
+    return { error: "Unsupported import file type. Use TSV, CSV, JSON, TXT, HTML, DAT, or FASTA." as const };
   }
   if (typeof fileContent !== "string" || !fileContent.trim()) {
     return { error: "No file content provided." as const };
@@ -1340,6 +1342,10 @@ function parseDelimitedFile(fileContent: string, fileName: string) {
     return { columns, rows };
   }
 
+  if (/\.(html?|fasta|fa|fna)$/i.test(fileName)) {
+    return { columns: [] as string[], rows: [] as Record<string, unknown>[] };
+  }
+
   const delimiter = fileName.toLowerCase().endsWith('.csv') ? ',' : '\t';
   const lines = trimmed.split(/\r?\n/).filter(Boolean);
   const columns = lines[0]?.split(delimiter).map((value) => value.trim()) || [];
@@ -1352,6 +1358,68 @@ function parseDelimitedFile(fileContent: string, fileName: string) {
   });
 
   return { columns, rows };
+}
+
+function parseFlexibleSummary(fileName: string, fileContent: string, existingSummary: Prisma.JsonValue | null | undefined) {
+  const summary = parseJsonObject(existingSummary);
+  const extension = path.extname(fileName).toLowerCase();
+  const content = extension === '.html' || extension === '.htm'
+    ? fileContent.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]*>/g, '\n')
+    : fileContent;
+
+  const lines = content
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 500);
+
+  const parsed: Record<string, unknown> = { ...summary };
+  const interestingKeys = new Set([
+    'genome_size',
+    'genome size',
+    'total_length',
+    'total length',
+    'gc_percent',
+    'gc content',
+    'gc_content',
+    'n50',
+    'l50',
+    'contigs',
+    'contig_count',
+    'completeness',
+    'contamination',
+    'cds',
+    'trna',
+    'rrna',
+    'amr genes',
+    'bgc',
+    'domains',
+  ]);
+
+  for (const line of lines) {
+    const match = /^([A-Za-z0-9 _./%-]{2,80})\s*[:=]\s*(.+)$/.exec(line);
+    if (!match) continue;
+
+    const rawKey = match[1].trim().toLowerCase().replace(/[\s./%-]+/g, '_');
+    const rawValue = match[2].trim();
+    const numeric = Number(rawValue.replace(/[,xX%]/g, ''));
+    if (interestingKeys.has(rawKey)) {
+      parsed[rawKey] = Number.isFinite(numeric) ? numeric : rawValue.slice(0, 240);
+      continue;
+    }
+    if (Number.isFinite(numeric) && /(size|length|count|coverage|gc|identity|score|total|n50|l50|completeness|contamination|trna|rrna|cds|bgc|domain)/i.test(rawKey)) {
+      parsed[rawKey] = numeric;
+      continue;
+    }
+    if (!parsed[rawKey] && rawValue.length <= 240) {
+      parsed[rawKey] = rawValue;
+    }
+  }
+
+  return parsed;
 }
 
 async function ingestSubmissionMayaFiles(submissionId: string, organismId: number, strainId: number) {
@@ -1378,6 +1446,7 @@ async function ingestSubmissionMayaFiles(submissionId: string, organismId: numbe
 
       const parsedTable = parseDelimitedFile(fileContent, file.originalFileName);
       const errors = parseJsonArray(file.errors);
+      const summary = parseFlexibleSummary(file.originalFileName, fileContent, file.summary);
       publishedPath = await saveUploadedResultFile({
         organismId,
         toolName: file.toolName,
@@ -1389,7 +1458,7 @@ async function ingestSubmissionMayaFiles(submissionId: string, organismId: numbe
         status: errors.length ? 'warning' : 'completed',
         version: file.toolVersion || undefined,
         finishedAt: new Date(),
-        summary: parseJsonObject(file.summary),
+        summary,
         tables: parsedTable.columns.length ? [{
           tableName: `${file.toolName} reviewed submission`,
           columns: parsedTable.columns,
@@ -2140,6 +2209,79 @@ app.get('/api/submissions/:id', requireAuth, async (req: AuthenticatedRequest, r
   }
 });
 
+app.patch('/api/submissions/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const submissionId = parseStringParam(req.params.id);
+    const existing = await prisma.organismUpload.findUnique({
+      where: { id: submissionId },
+      select: {
+        id: true,
+        submittedById: true,
+        status: true,
+      },
+    });
+
+    if (!existing) return res.status(404).json({ error: "Submission not found" });
+
+    const isOwner = existing.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) {
+      await writeAdminLog(req.user?.userId, "SUBMISSION_EDIT_UNAUTHORIZED", "OrganismUpload", submissionId, {
+        result: "failure",
+        statusCode: 403,
+      });
+      return res.status(403).json({ error: "You are not allowed to edit this submission" });
+    }
+
+    if (!isAdmin && existing.status !== ApprovalStatus.PENDING && existing.status !== ApprovalStatus.NEEDS_CHANGES) {
+      return res.status(409).json({ error: "This submission can only be edited while it is pending or needs changes" });
+    }
+
+    const payload = buildOrganismUploadData(req.body || {});
+    if ("error" in payload) {
+      return res.status(400).json({ error: payload.error });
+    }
+
+    const resubmissionNote = reviewNoteValue(req.body.reviewNote || req.body.submitterNote);
+    const updated = await prisma.organismUpload.update({
+      where: { id: submissionId },
+      data: {
+        ...payload.data,
+        status: ApprovalStatus.PENDING,
+        reviewedById: null,
+        reviewedAt: null,
+      },
+      include: submissionDetailInclude(isAdmin),
+    });
+
+    await recordSubmissionStatusHistory({
+      submissionId,
+      status: "RESUBMITTED",
+      actorId: req.user?.userId,
+      note: resubmissionNote || "Submission updated by submitter and returned to the review queue.",
+      visibleToSubmitter: true,
+    });
+
+    if (resubmissionNote) {
+      await addSubmissionReviewerNote({
+        submissionId,
+        authorId: req.user?.userId,
+        message: resubmissionNote,
+        visibleToSubmitter: true,
+      });
+    }
+
+    await writeAdminLog(req.user?.userId, isAdmin ? "ADMIN_SUBMISSION_EDITED" : "USER_SUBMISSION_EDITED", "OrganismUpload", submissionId, {
+      result: "success",
+    });
+
+    res.json({ message: "Submission updated", submission: buildSubmissionResponse(updated) });
+  } catch (error) {
+    console.error("Submission Update Error:", error);
+    res.status(500).json({ error: "Failed to update submission" });
+  }
+});
+
 app.post('/api/organism-uploads', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const payload = buildOrganismUploadData(req.body || {});
@@ -2317,6 +2459,49 @@ app.get('/api/submissions/:submissionId/files/:fileId/download', requireAuth, as
       error: safeErrorMessage(error, 'Submission file download failed'),
     });
     if (!res.headersSent) res.status(500).json({ error: 'Failed to download submission file' });
+  }
+});
+
+app.get('/api/submissions/:submissionId/files/:fileId/view', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const submissionId = parseStringParam(req.params.submissionId);
+  const fileId = parseStringParam(req.params.fileId);
+
+  try {
+    const file = await prisma.submissionFile.findFirst({
+      where: { id: fileId, submissionId },
+      include: { submission: { select: { submittedById: true } } },
+    });
+    if (!file) return res.status(404).json({ error: 'Submission file not found' });
+
+    const isOwner = file.submission.submittedById === req.user?.userId;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin) {
+      await writeAdminLog(req.user?.userId, 'SUBMISSION_FILE_VIEW_DENIED', 'OrganismUpload', submissionId, {
+        result: 'failure',
+        fileId,
+        statusCode: 403,
+      });
+      return res.status(403).json({ error: 'You are not allowed to view this submission file' });
+    }
+
+    await writeAdminLog(req.user?.userId, 'SUBMISSION_FILE_VIEWED', 'OrganismUpload', submissionId, {
+      fileId,
+      toolName: file.toolName,
+      result: 'success',
+    });
+    await sendStoredFileInline(req, res, file.storagePath, {
+      fileName: file.originalFileName,
+      contentType: contentTypeForFileName(file.originalFileName),
+      cacheControl: 'private, no-store',
+    });
+  } catch (error) {
+    logEvent('error', 'submission_file_view_failed', {
+      submissionId,
+      fileId,
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Submission file view failed'),
+    });
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to view submission file' });
   }
 });
 

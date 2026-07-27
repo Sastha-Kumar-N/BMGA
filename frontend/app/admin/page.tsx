@@ -161,7 +161,7 @@ type StrainFormState = typeof EMPTY_STRAIN_FORM;
 
 const MAYA_TOOLS = [
   'abricate', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
-  'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'rnlst',
+  'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'mlst', 'rnlst',
   'multiqc', 'prokka', 'quast', 'spades', 'trf', 'trnascan',
 ];
 

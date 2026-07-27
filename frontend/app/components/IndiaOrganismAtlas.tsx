@@ -6,6 +6,7 @@ import { ImageOverlay, MapContainer, Marker, Popup, TileLayer, useMap } from 're
 import type { LatLngBoundsExpression, LatLngExpression } from 'leaflet';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowUpRight, Database, FlaskConical, MapPin, Microscope } from 'lucide-react';
+import { filterIndianStrains } from './surveillance/geography';
 
 export type AtlasOrganism = {
   id: number;
@@ -174,7 +175,7 @@ function MapViewportController({ points, activeStrainId }: { points: AtlasPoint[
 
 export default function IndiaOrganismAtlas({ strains, activeStrainId, onOpenOrganism }: IndiaOrganismAtlasProps) {
   const atlasPoints = useMemo<AtlasPoint[]>(() => (
-    strains
+    filterIndianStrains(strains)
       .map((strain) => {
         const latitudeValue = asNumber(strain.latitude);
         const longitudeValue = asNumber(strain.longitude);

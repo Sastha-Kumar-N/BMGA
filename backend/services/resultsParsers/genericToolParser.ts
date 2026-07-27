@@ -3,7 +3,7 @@ import path from "path";
 import { NormalizedToolParseResult, ToolParser, ToolResultTableData } from "./parserTypes";
 import { normalizeToolName } from "./toolDefinitions";
 
-const TABULAR_EXTENSIONS = new Set([".tsv", ".csv", ".txt", ".out"]);
+const TABULAR_EXTENSIONS = new Set([".tsv", ".csv", ".txt", ".out", ".dat"]);
 const SUMMARY_FILES = new Set(["summary.json", "metrics.json", "multiqc_data.json"]);
 
 function splitDelimitedLine(line: string, delimiter: string) {
@@ -20,10 +20,12 @@ function parseDelimitedTable(content: string, fileName: string): ToolResultTable
     return null;
   }
 
-  const delimiter = fileName.endsWith(".csv") ? "," : "\t";
-  const columns = splitDelimitedLine(lines[0], delimiter);
+  const extension = path.extname(fileName).toLowerCase();
+  const delimiter = extension === ".csv" ? "," : extension === ".dat" ? /\s+/ : "\t";
+  const splitLine = (line: string) => (delimiter instanceof RegExp ? line.split(delimiter).map((value) => value.trim()).filter(Boolean) : splitDelimitedLine(line, delimiter));
+  const columns = splitLine(lines[0]);
   const rows = lines.slice(1).map((line) => {
-    const values = splitDelimitedLine(line, delimiter);
+    const values = splitLine(line);
     return columns.reduce<Record<string, string>>((row, column, index) => {
       row[column || `column_${index + 1}`] = values[index] || "";
       return row;

@@ -39,6 +39,7 @@ export const parserRegistry: Record<string, ToolParser> = {
   minced: parseMinced,
   rnlst: parseRnlst,
   multiqc: parseMultiqc,
+  mlst: parseRnlst,
   prokka: parseProkka,
   quast: parseQuast,
   spades: parseSpades,
