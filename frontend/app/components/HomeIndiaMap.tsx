@@ -33,6 +33,8 @@ type HomeIndiaMapProps = {
   strains: HomeMapStrain[];
   loading?: boolean;
   error?: string | null;
+  selectedStrainId?: number | null;
+  onSelectStrain?: (strainId: number) => void;
 };
 
 const INDIA_CENTER: LatLngExpression = [22.6, 79.2];
@@ -48,7 +50,7 @@ function numericValue(value: number | string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function createHomeMarkerIcon(sourceType?: string | null) {
+function createHomeMarkerIcon(sourceType?: string | null, selected = false) {
   const source = (sourceType || '').toLowerCase();
   const color = /clinical|hospital|patient/.test(source)
     ? '#2563eb'
@@ -61,16 +63,16 @@ function createHomeMarkerIcon(sourceType?: string | null) {
           : '#f97316';
 
   const svg = encodeURIComponent(`
-    <svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44">
-      <path d="M17 42C14.4 37.8 3 27.7 3 16.9C3 8.7 9.3 2 17 2s14 6.7 14 14.9C31 27.7 19.6 37.8 17 42Z" fill="${color}" stroke="#ffffff" stroke-width="3"/>
+    <svg xmlns="http://www.w3.org/2000/svg" width="${selected ? 42 : 34}" height="${selected ? 54 : 44}" viewBox="0 0 34 44">
+      <path d="M17 42C14.4 37.8 3 27.7 3 16.9C3 8.7 9.3 2 17 2s14 6.7 14 14.9C31 27.7 19.6 37.8 17 42Z" fill="${color}" stroke="#ffffff" stroke-width="${selected ? 4 : 3}"/>
       <circle cx="17" cy="16.5" r="5.2" fill="#ffffff"/>
     </svg>
   `);
 
   return new L.Icon({
     iconUrl: `data:image/svg+xml;charset=UTF-8,${svg}`,
-    iconSize: [34, 44],
-    iconAnchor: [17, 42],
+    iconSize: selected ? [42, 54] : [34, 44],
+    iconAnchor: selected ? [21, 51] : [17, 42],
     popupAnchor: [0, -38],
   });
 }
@@ -85,23 +87,38 @@ function formatGc(value?: number | string | null) {
   return parsed === null ? 'N/A' : `${parsed.toFixed(2)}%`;
 }
 
-function MapViewport({ points }: { points: HomeMapPoint[] }) {
+function MapViewport({ points, selectedStrainId }: { points: HomeMapPoint[]; selectedStrainId?: number | null }) {
   const map = useMap();
-  const pointCount = points.length;
 
   useEffect(() => {
-    if (pointCount > 1) {
+    if (points.length > 1) {
       map.fitBounds(points.map((point) => [point.latitudeValue, point.longitudeValue]) as LatLngBoundsExpression, { padding: [40, 40], maxZoom: 6 });
       return;
     }
 
     map.fitBounds(INDIA_BOUNDS, { padding: [10, 10], maxZoom: 5 });
-  }, [map, pointCount, points]);
+  }, [map, points]);
+
+  useEffect(() => {
+    const selectedPoint = points.find((point) => point.id === selectedStrainId);
+    if (selectedPoint) {
+      map.fitBounds([
+        [selectedPoint.latitudeValue - 0.35, selectedPoint.longitudeValue - 0.35],
+        [selectedPoint.latitudeValue + 0.35, selectedPoint.longitudeValue + 0.35],
+      ], { padding: [60, 60], maxZoom: 7 });
+    }
+  }, [map, points, selectedStrainId]);
 
   return null;
 }
 
-export default function HomeIndiaMap({ strains, loading = false, error = null }: HomeIndiaMapProps) {
+export default function HomeIndiaMap({
+  strains,
+  loading = false,
+  error = null,
+  selectedStrainId = null,
+  onSelectStrain,
+}: HomeIndiaMapProps) {
   const points = useMemo<HomeMapPoint[]>(() => (
     filterIndianStrains(strains)
       .map((strain) => {
@@ -125,7 +142,7 @@ export default function HomeIndiaMap({ strains, loading = false, error = null }:
         zoom={5}
         minZoom={4}
         maxZoom={10}
-        scrollWheelZoom={false}
+        scrollWheelZoom
         className="bmga-home-map h-full w-full"
         style={{ height: '100%', width: '100%' }}
       >
@@ -134,15 +151,18 @@ export default function HomeIndiaMap({ strains, loading = false, error = null }:
           attribution="Map data &copy; Google"
           maxZoom={18}
         />
-        <MapViewport points={points} />
+        <MapViewport points={points} selectedStrainId={selectedStrainId} />
 
-        {points.map((point) => (
-          <Marker
-            key={point.id}
-            position={[point.latitudeValue, point.longitudeValue]}
-            icon={createHomeMarkerIcon(point.sourceType)}
-            title={`${point.organism?.scientificName || 'Unknown organism'} ${point.strainName || ''}`}
-          >
+        {points.map((point) => {
+          const isSelected = point.id === selectedStrainId;
+          return (
+            <Marker
+              key={point.id}
+              position={[point.latitudeValue, point.longitudeValue]}
+              icon={createHomeMarkerIcon(point.sourceType, isSelected)}
+              title={`${point.organism?.scientificName || 'Unknown organism'} ${point.strainName || ''}`}
+              eventHandlers={{ click: () => onSelectStrain?.(point.id) }}
+            >
             <Popup minWidth={240}>
               <div className="font-sans">
                 <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">
@@ -167,10 +187,17 @@ export default function HomeIndiaMap({ strains, loading = false, error = null }:
                     <p className="mt-1 font-mono font-black text-[#0B1B3A]">{formatGc(point.gcContent)}</p>
                   </div>
                 </div>
+                <a
+                  href={`/organisms/${point.organismId}/results`}
+                  className="mt-3 inline-flex min-h-10 w-full items-center justify-center bg-[#0B1B3A] px-3 text-xs font-black text-white transition hover:bg-orange-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500"
+                >
+                  Open organism results
+                </a>
               </div>
             </Popup>
-          </Marker>
-        ))}
+            </Marker>
+          );
+        })}
       </MapContainer>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[500] bg-gradient-to-t from-[#071833]/95 via-[#071833]/70 to-transparent p-5">
@@ -180,6 +207,11 @@ export default function HomeIndiaMap({ strains, loading = false, error = null }:
           <HeroSignal label="Live Records" value={loading ? '...' : strains.length.toLocaleString('en-IN')} />
         </div>
       </div>
+      {points.length > 0 && (
+        <p className="pointer-events-none absolute left-5 top-5 z-[500] rounded-md bg-[#071833]/85 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-lg">
+          Select a marker to inspect its record
+        </p>
+      )}
 
       {(loading || error || points.length === 0) && (
         <div className="pointer-events-none absolute left-1/2 top-1/2 z-[550] w-[min(360px,calc(100%-40px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/15 bg-[#071833]/90 p-6 text-center text-white shadow-2xl backdrop-blur">

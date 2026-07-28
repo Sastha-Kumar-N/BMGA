@@ -113,6 +113,7 @@ export default function HomePortal() {
   const { data: session } = useSession();
   const { data, loading, refreshing, error } = useHomePortalData();
   const [registryQuery, setRegistryQuery] = useState('');
+  const [selectedIndiaStrainId, setSelectedIndiaStrainId] = useState<number | null>(null);
 
   const overview = data.overview;
   const indiaStrains = useMemo(() => filterIndianStrains(data.strains), [data.strains]);
@@ -358,7 +359,13 @@ export default function HomePortal() {
               <p className="text-base font-semibold leading-7 text-slate-600">Markers are generated from approved latitude and longitude metadata. Open a record to review its organism, strain, source, genome statistics, and available MAYA outputs.</p>
             </div>
             <div className="mt-10 grid gap-6 xl:grid-cols-[1.45fr_0.55fr]">
-              <HomeIndiaMap strains={data.strains} loading={loading} error={!data.strains.length ? error : null} />
+              <HomeIndiaMap
+                strains={data.strains}
+                loading={loading}
+                error={!data.strains.length ? error : null}
+                selectedStrainId={selectedIndiaStrainId}
+                onSelectStrain={setSelectedIndiaStrainId}
+              />
               <div className="border-y border-slate-200 bg-white px-5">
                 <div className="flex items-center justify-between border-b border-slate-200 py-5">
                   <h3 className="text-lg font-black">Latest India records</h3>
@@ -366,7 +373,14 @@ export default function HomePortal() {
                 </div>
                 <div className="divide-y divide-slate-200">
                   {latestIndiaRecords.length ? latestIndiaRecords.map((strain) => (
-                    <Link key={strain.id} href={`/organisms/${strain.organismId}/results`} className="group block py-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500">
+                    <Link
+                      key={strain.id}
+                      href={`/organisms/${strain.organismId}/results`}
+                      onFocus={() => setSelectedIndiaStrainId(strain.id)}
+                      onMouseEnter={() => setSelectedIndiaStrainId(strain.id)}
+                      aria-current={selectedIndiaStrainId === strain.id ? 'true' : undefined}
+                      className={`group block border-l-2 py-5 pl-3 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${selectedIndiaStrainId === strain.id ? 'border-orange-500 bg-orange-50/70' : 'border-transparent hover:border-orange-300 hover:bg-slate-50'}`}
+                    >
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0"><p className="truncate text-sm font-black italic group-hover:text-orange-700">{strain.organism?.scientificName || 'Unknown organism'}</p><p className="mt-1 truncate font-mono text-xs font-bold text-slate-500">{strain.strainName || 'Unnamed strain'}</p></div>
                         <ArrowRight className="shrink-0 text-slate-400 transition group-hover:translate-x-1 group-hover:text-orange-600" size={16} />
