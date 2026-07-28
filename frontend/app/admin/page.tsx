@@ -162,7 +162,7 @@ type StrainFormState = typeof EMPTY_STRAIN_FORM;
 const MAYA_TOOLS = [
   'abricate', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
   'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'mlst', 'rnlst',
-  'multiqc', 'prokka', 'quast', 'spades', 'trf', 'trnascan',
+  'multiqc', 'prokka', 'quast', 'spades', 'trf', 'trnascan', 'custom',
 ];
 
 const ADMIN_TABS: AdminTab[] = [
@@ -194,6 +194,7 @@ export default function AdminPortal() {
   const [referenceInventory, setReferenceInventory] = useState<GenomeReferenceRecord[]>([]);
   const [blastStatus, setBlastStatus] = useState<BlastDatabaseStatus | null>(null);
   const [mayaFile, setMayaFile] = useState<File | null>(null);
+  const [customMayaToolName, setCustomMayaToolName] = useState('');
   const [status, setStatus] = useState<StatusState>({ type: 'idle', message: '' });
   const [loadingRegistry, setLoadingRegistry] = useState(true);
 
@@ -391,21 +392,26 @@ export default function AdminPortal() {
 
   const handleMayaUpload = async () => {
     if (!mayaForm.organismId) return;
+    const effectiveToolName = mayaForm.toolName === 'custom' ? customMayaToolName.trim() : mayaForm.toolName;
+    if (!/^[a-zA-Z][a-zA-Z0-9 _.-]{1,79}$/.test(effectiveToolName)) {
+      setStatus({ type: 'error', message: 'Enter a valid custom MAYA tool name.' });
+      return;
+    }
     setStatus({ type: 'loading', message: 'Ingesting MAYA result...' });
     try {
       await submitJson('/admin/maya-results', 'POST', {
         organismId: mayaForm.organismId,
         strainId: mayaForm.strainId || null,
-        toolName: mayaForm.toolName,
+        toolName: effectiveToolName,
         status: mayaForm.runStatus,
         version: mayaForm.version,
         summary: mayaForm.summary,
-        tableName: mayaForm.tableName || `${mayaForm.toolName} MAYA output`,
+        tableName: mayaForm.tableName || `${effectiveToolName} MAYA output`,
         fileName: mayaFile?.name || '',
         fileContent: mayaFile ? await mayaFile.text() : '',
         warnings: mayaForm.warnings,
         errors: mayaForm.errors,
-      }, `${mayaForm.toolName} MAYA results ingested.`);
+      }, `${effectiveToolName} MAYA results ingested.`);
       setMayaFile(null);
     } catch (error) {
       setStatus({ type: 'error', message: error instanceof Error ? error.message : 'Failed to ingest MAYA result.' });
@@ -535,21 +541,22 @@ export default function AdminPortal() {
 
               {activeTab === 'maya' && (
                 <div className="space-y-6">
-                  <SectionTitle title="Ingest MAYA results" subtitle="Upload a TSV, CSV, TXT, or JSON result table and normalized summary metadata for the selected organism." />
+                  <SectionTitle title="Ingest MAYA results" subtitle="Add a standard or custom tool result. Summary metrics are optional and can be read from TSV, CSV, TXT, HTML, DAT, or FASTA output without requiring JSON." />
                   <div className="grid gap-5 md:grid-cols-2">
                     <SelectInput label="Target organism" value={mayaForm.organismId} onChange={(value) => setMayaForm((current) => ({ ...current, organismId: value, strainId: '' }))} options={organisms.map((item) => ({ value: item.id.toString(), label: item.scientificName }))} />
                     <SelectInput label="Target genome / strain" value={mayaForm.strainId} onChange={(value) => setMayaForm((current) => ({ ...current, strainId: value }))} options={[{ value: '', label: 'Organism-level result' }, ...strains.filter((item) => !mayaForm.organismId || item.organismId.toString() === mayaForm.organismId).map((item) => ({ value: item.id.toString(), label: item.strainName }))]} />
-                    <SelectInput label="MAYA tool" value={mayaForm.toolName} onChange={(value) => setMayaForm((current) => ({ ...current, toolName: value }))} options={MAYA_TOOLS.map((tool) => ({ value: tool, label: tool }))} />
+                    <SelectInput label="MAYA tool" value={mayaForm.toolName} onChange={(value) => setMayaForm((current) => ({ ...current, toolName: value }))} options={MAYA_TOOLS.map((tool) => ({ value: tool, label: tool === 'custom' ? 'Custom tool...' : tool }))} />
+                    {mayaForm.toolName === 'custom' && <TextInput label="Custom tool name" value={customMayaToolName} onChange={setCustomMayaToolName} />}
                     <SelectInput label="Run status" value={mayaForm.runStatus} onChange={(value) => setMayaForm((current) => ({ ...current, runStatus: value }))} options={['completed', 'warning', 'partial', 'failed', 'pending', 'not_available'].map((item) => ({ value: item, label: item }))} />
                     <TextInput label="Tool version" value={mayaForm.version} onChange={(value) => setMayaForm((current) => ({ ...current, version: value }))} />
                     <TextInput label="Table name" value={mayaForm.tableName} onChange={(value) => setMayaForm((current) => ({ ...current, tableName: value }))} />
                   </div>
-                  <TextArea label="Summary JSON" value={mayaForm.summary} onChange={(value) => setMayaForm((current) => ({ ...current, summary: value }))} rows={7} mono />
+                  <TextArea label="Optional summary metrics" value={mayaForm.summary} onChange={(value) => setMayaForm((current) => ({ ...current, summary: value }))} rows={7} mono />
                   <button type="button" onClick={() => mayaFileInputRef.current?.click()} className="flex min-h-24 w-full items-center gap-4 rounded-md border border-dashed border-slate-300 bg-slate-50 p-5 text-left hover:border-orange-400">
                     <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white text-orange-600"><FileText size={22} /></span>
-                    <span><span className="block text-sm font-black">{mayaFile?.name || 'Attach optional MAYA output file'}</span><span className="mt-1 block text-xs font-semibold text-slate-500">TSV, CSV, TXT, or JSON · 5 MB maximum</span></span>
+                    <span><span className="block text-sm font-black">{mayaFile?.name || 'Attach optional MAYA output file'}</span><span className="mt-1 block text-xs font-semibold text-slate-500">TSV, CSV, TXT, JSON, HTML, DAT, or FASTA · 10 MB maximum</span></span>
                   </button>
-                  <input ref={mayaFileInputRef} type="file" className="sr-only" accept=".tsv,.csv,.txt,.json" onChange={(event) => setMayaFile(event.target.files?.[0] || null)} />
+                  <input ref={mayaFileInputRef} type="file" className="sr-only" accept=".tsv,.csv,.txt,.json,.html,.htm,.dat,.fasta,.fa,.fna" onChange={(event) => setMayaFile(event.target.files?.[0] || null)} />
                   <TextArea label="Warnings" value={mayaForm.warnings} onChange={(value) => setMayaForm((current) => ({ ...current, warnings: value }))} rows={3} />
                   <TextArea label="Errors" value={mayaForm.errors} onChange={(value) => setMayaForm((current) => ({ ...current, errors: value }))} rows={3} />
                   <button type="button" onClick={handleMayaUpload} disabled={status.type === 'loading' || !mayaForm.organismId} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-[#0B1B3A] px-5 text-sm font-black text-white hover:bg-orange-500 disabled:opacity-50"><UploadCloud size={17} />{status.type === 'loading' ? 'Processing...' : 'Ingest MAYA result'}</button>

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { signIn, useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, Dna, Edit3, Home, LayoutDashboard, Lock, Save, UserRound } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Dna, Edit3, FileUp, Home, LayoutDashboard, Lock, Save, UserRound } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 import { BRAND_FULL_NAME } from '../../lib/brand';
 import BrandLogo from '../../components/BrandLogo';
@@ -153,6 +153,14 @@ const EMPTY_DRAFT: SubmissionDraft = {
   lastVerifiedAt: '',
 };
 
+const MAYA_TOOLS = [
+  'abricate', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
+  'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'mlst', 'multiqc',
+  'prokka', 'quast', 'rnlst', 'spades', 'trf', 'trnascan', 'custom',
+];
+const RESULT_FILE_PATTERN = /\.(tsv|csv|json|txt|html?|dat|fasta|fa|fna)$/i;
+const MAX_RESULT_FILE_BYTES = 10 * 1024 * 1024;
+
 export default function UserSubmissionDetailPage() {
   const params = useParams<{ id: string }>();
   const { data: session, status } = useSession();
@@ -160,12 +168,15 @@ export default function UserSubmissionDetailPage() {
   const [message, setMessage] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; text: string }>({ type: 'idle', text: '' });
   const [draft, setDraft] = useState<SubmissionDraft>(EMPTY_DRAFT);
   const [editState, setEditState] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; text: string }>({ type: 'idle', text: '' });
+  const [checkpointState, setCheckpointState] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; text: string }>({ type: 'idle', text: '' });
 
   const headers = useMemo(() => ({
     Authorization: `Bearer ${session?.user?.accessToken || ''}`,
   }), [session?.user?.accessToken]);
 
   const isEditable = Boolean(submission && (submission.status === 'PENDING' || submission.status === 'NEEDS_CHANGES'));
+  const canAmendApproved = ['CONTRIBUTOR', 'MODERATOR', 'ADMIN'].includes(session?.user?.role || '');
+  const canManageResultCheckpoints = Boolean(submission && (isEditable || (submission.status === 'APPROVED' && canAmendApproved)));
 
   const load = useCallback(async () => {
     if (!session?.user?.accessToken || !params.id) return;
@@ -368,6 +379,15 @@ export default function UserSubmissionDetailPage() {
             </section>
 
             <SubmissionFilesPanel files={submission.files || []} />
+            {canManageResultCheckpoints && (
+              <ResultCheckpointPanel
+                submission={submission}
+                authorization={session?.user?.accessToken || ''}
+                onSaved={load}
+                state={checkpointState}
+                setState={setCheckpointState}
+              />
+            )}
             <SubmissionFilesPanel files={submission.genomeReferences || []} title="Genome References" eyebrow="FASTA & Annotation" emptyMessage="No FASTA or GFF3 reference files are attached to this submission." />
           </section>
 
@@ -394,6 +414,95 @@ export default function UserSubmissionDetailPage() {
         </div>
       )}
     </Shell>
+  );
+}
+
+function ResultCheckpointPanel({
+  submission,
+  authorization,
+  onSaved,
+  state,
+  setState,
+}: {
+  submission: Submission;
+  authorization: string;
+  onSaved: () => Promise<void>;
+  state: { type: 'idle' | 'loading' | 'success' | 'error'; text: string };
+  setState: React.Dispatch<React.SetStateAction<{ type: 'idle' | 'loading' | 'success' | 'error'; text: string }>>;
+}) {
+  const [toolName, setToolName] = useState('abricate');
+  const [customToolName, setCustomToolName] = useState('');
+  const [toolVersion, setToolVersion] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const effectiveToolName = toolName === 'custom' ? customToolName.trim() : toolName;
+  const existingCheckpoint = submission.files.find((item) => item.toolName === effectiveToolName);
+
+  const saveCheckpoint = async () => {
+    if (!file) {
+      setState({ type: 'error', text: 'Choose a MAYA result file before saving a checkpoint.' });
+      return;
+    }
+    if (!RESULT_FILE_PATTERN.test(file.name)) {
+      setState({ type: 'error', text: 'Use TSV, CSV, JSON, TXT, HTML, DAT, or FASTA result files.' });
+      return;
+    }
+    if (file.size > MAX_RESULT_FILE_BYTES) {
+      setState({ type: 'error', text: 'Each MAYA result checkpoint must be 10 MB or smaller.' });
+      return;
+    }
+    if (!/^[a-zA-Z][a-zA-Z0-9 _.-]{1,79}$/.test(effectiveToolName)) {
+      setState({ type: 'error', text: 'Enter a valid custom tool name.' });
+      return;
+    }
+
+    setState({ type: 'loading', text: 'Saving secure tool checkpoint...' });
+    try {
+      const response = await fetch(apiPath(existingCheckpoint
+        ? `/organism-uploads/${submission.id}/maya-files/${existingCheckpoint.id}`
+        : `/organism-uploads/${submission.id}/maya-files`), {
+        method: existingCheckpoint ? 'PUT' : 'POST',
+        headers: { Authorization: `Bearer ${authorization}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toolName: effectiveToolName,
+          toolVersion,
+          fileName: file.name,
+          fileContent: await file.text(),
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string; message?: string };
+      if (!response.ok) throw new Error(data.error || 'Failed to save tool checkpoint');
+      setFile(null);
+      setToolVersion('');
+      setState({ type: 'success', text: data.message || 'Tool checkpoint saved for review.' });
+      await onSaved();
+    } catch (error) {
+      setState({ type: 'error', text: error instanceof Error ? error.message : 'Failed to save tool checkpoint' });
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-teal-200 bg-teal-50/50 p-6 shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-teal-100 pb-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-teal-700">Per-tool checkpoint</p>
+          <h2 className="mt-1 text-xl font-black tracking-tight text-[#0B1B3A]">Add or replace a MAYA result</h2>
+          <p className="mt-1 max-w-3xl text-sm font-semibold leading-6 text-slate-600">Each saved tool file is a persistent checkpoint. Replacing a result keeps the currently published output unchanged until an administrator reviews the amendment.</p>
+        </div>
+        <span className="inline-flex w-fit items-center gap-2 rounded-full border border-teal-200 bg-white px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-teal-700"><FileUp size={14} /> Private until approved</span>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <label className="block"><span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-500">MAYA Tool</span><select value={toolName} onChange={(event) => setToolName(event.target.value)} className="h-11 w-full rounded-xl border border-teal-100 bg-white px-3 text-sm font-bold outline-none focus:border-teal-500">{MAYA_TOOLS.map((tool) => <option key={tool} value={tool}>{tool === 'custom' ? 'Custom tool…' : tool}</option>)}</select></label>
+        {toolName === 'custom' && <label className="block"><span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-500">Custom Tool Name</span><input value={customToolName} onChange={(event) => setCustomToolName(event.target.value)} placeholder="e.g. plasmidfinder" className="h-11 w-full rounded-xl border border-teal-100 bg-white px-3 text-sm font-bold outline-none focus:border-teal-500" /></label>}
+        <label className="block"><span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-500">Tool Version</span><input value={toolVersion} onChange={(event) => setToolVersion(event.target.value)} placeholder="Optional" className="h-11 w-full rounded-xl border border-teal-100 bg-white px-3 text-sm font-bold outline-none focus:border-teal-500" /></label>
+        <label className="block"><span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-500">Result File</span><input type="file" accept=".tsv,.csv,.json,.txt,.html,.htm,.dat,.fasta,.fa,.fna" onChange={(event) => setFile(event.target.files?.[0] || null)} className="block h-11 w-full rounded-xl border border-teal-100 bg-white px-3 py-2 text-xs font-semibold file:mr-3 file:border-0 file:bg-teal-50 file:px-2 file:py-1 file:text-xs file:font-black" /></label>
+      </div>
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-semibold text-slate-500">{file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB` : 'TSV, CSV, JSON, TXT, HTML, DAT, and FASTA · 10 MB maximum'}{existingCheckpoint ? ' · This will replace the saved checkpoint for the selected tool.' : ''}</p>
+        <button type="button" onClick={() => void saveCheckpoint()} disabled={state.type === 'loading'} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:bg-teal-800 disabled:opacity-50"><Save size={15} />{state.type === 'loading' ? 'Saving...' : existingCheckpoint ? 'Replace checkpoint' : 'Save checkpoint'}</button>
+      </div>
+      {state.type !== 'idle' && <div className={`mt-4 rounded-xl p-3 text-sm font-bold ${state.type === 'error' ? 'border border-red-200 bg-red-50 text-red-700' : state.type === 'success' ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'border border-teal-200 bg-white text-teal-800'}`}>{state.text}</div>}
+    </section>
   );
 }
 

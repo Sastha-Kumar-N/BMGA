@@ -412,6 +412,16 @@ function findFirstLegacyResult(strains: any[], field: string) {
   return null;
 }
 
+function firstToolMetric(tools: Record<string, ToolResult>, keys: string[]) {
+  for (const tool of Object.values(tools)) {
+    for (const key of keys) {
+      const value = tool.summary?.[key];
+      if (value !== null && value !== undefined && value !== "") return value;
+    }
+  }
+  return undefined;
+}
+
 function getOrganismSummary(organism: any, tools: Record<string, ToolResult>) {
   const primaryStrain = choosePrimaryStrain(organism.strains || []);
   const primaryAssembly = primaryStrain?.assemblies?.[0];
@@ -429,21 +439,21 @@ function getOrganismSummary(organism: any, tools: Record<string, ToolResult>) {
   const abricate = tools.abricate?.summary || {};
 
   return cleanSummary({
-    genome_size: primaryStrain?.genomeSize || primaryAssembly?.totalLength || Number(spades.total_length_mb || 0) * 1_000_000 || undefined,
-    gc_percent: primaryStrain?.gcContent ? Number(primaryStrain.gcContent) : quast.gc_percent,
-    contig_count: primaryAssembly?.contigCount || spades.contigs_generated,
+    genome_size: primaryStrain?.genomeSize || primaryAssembly?.totalLength || firstToolMetric(tools, ["genome_size", "genome_size_bp", "total_length", "total_length_bp"]) || Number(spades.total_length_mb || 0) * 1_000_000 || undefined,
+    gc_percent: primaryStrain?.gcContent ? Number(primaryStrain.gcContent) : quast.gc_percent || firstToolMetric(tools, ["gc_percent", "gc_content"]),
+    contig_count: primaryAssembly?.contigCount || spades.contigs_generated || firstToolMetric(tools, ["contig_count", "contigs", "total_contigs"]),
     n50: primaryAssembly?.n50 || (typeof quast.n50_kb === "number" ? quast.n50_kb * 1000 : undefined),
     assembly_level: primaryAssembly?.assemblyLevel || primaryStrain?.genomeStatus,
     completeness: checkm.completeness || busco.complete_percent,
     contamination: checkm.contamination,
-    cds_count: prokka.cds_count,
-    trna_count: prokka.trna_genes || trnascan.total_trnas,
-    rrna_count: prokka.rrna_genes || barrnap.total_rrna,
+    cds_count: prokka.cds_count || firstToolMetric(tools, ["cds_count", "cds"]),
+    trna_count: prokka.trna_genes || trnascan.total_trnas || firstToolMetric(tools, ["trna_count", "trna", "total_trnas"]),
+    rrna_count: prokka.rrna_genes || barrnap.total_rrna || firstToolMetric(tools, ["rrna_count", "rrna", "total_rrna"]),
     amr_gene_count: primaryStrain?._count?.amrGenes || abricate.total_hits,
     crispr_array_count: minced.crispr_arrays,
     biosynthetic_cluster_count: antismash.bgc_regions,
     pathway_hit_count: kofam.kegg_pathways,
-    domain_hit_count: hmmer.total_domain_hits,
+    domain_hit_count: hmmer.total_domain_hits || firstToolMetric(tools, ["domain_hit_count", "domains", "total_domain_hits"]),
     virulence_hit_count: abricate.virulence_genes,
   });
 }
@@ -551,7 +561,7 @@ export async function getOrganismResults(prisma: PrismaClient, organismId: numbe
     },
     summary: getOrganismSummary(organism, tools),
     tools,
-    toolOrder: TOOL_KEYS,
+    toolOrder: [...TOOL_KEYS, ...Object.keys(tools).filter((toolName) => !TOOL_KEYS.includes(toolName as typeof TOOL_KEYS[number]))],
     toolDefinitions: TOOL_DEFINITIONS,
   };
 }

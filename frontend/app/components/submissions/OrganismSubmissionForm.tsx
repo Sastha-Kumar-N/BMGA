@@ -22,7 +22,7 @@ type GenomeReferenceAttachments = Partial<Record<'FASTA' | 'GFF3', File>>;
 const MAYA_TOOLS = [
   'abricate', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
   'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'mlst', 'multiqc',
-  'prokka', 'quast', 'rnlst', 'spades', 'trf', 'trnascan',
+  'prokka', 'quast', 'rnlst', 'spades', 'trf', 'trnascan', 'custom',
 ];
 
 const MAX_RESULT_FILE_BYTES = 10 * 1024 * 1024;
@@ -88,6 +88,7 @@ export function OrganismSubmissionForm({ surveillanceMode = false }: { surveilla
   const [mayaAttachments, setMayaAttachments] = useState<MayaAttachment[]>([]);
   const [genomeReferences, setGenomeReferences] = useState<GenomeReferenceAttachments>({});
   const [pendingTool, setPendingTool] = useState('abricate');
+  const [customToolName, setCustomToolName] = useState('');
   const [pendingToolVersion, setPendingToolVersion] = useState('');
 
   const authHeaders = useMemo(() => ({
@@ -181,12 +182,18 @@ export function OrganismSubmissionForm({ surveillanceMode = false }: { surveilla
       setStatus({ type: 'error', message: 'Each MAYA result file must be 10 MB or smaller.' });
       return;
     }
-    if (mayaAttachments.some((attachment) => attachment.toolName === pendingTool)) {
-      setStatus({ type: 'error', message: `A ${pendingTool} result is already attached. Remove it before choosing a replacement.` });
+    const effectiveToolName = pendingTool === 'custom' ? customToolName.trim() : pendingTool;
+    if (!/^[a-zA-Z][a-zA-Z0-9 _.-]{1,79}$/.test(effectiveToolName)) {
+      setStatus({ type: 'error', message: 'Enter a valid custom MAYA tool name before attaching a file.' });
       return;
     }
-    setMayaAttachments((current) => [...current, { toolName: pendingTool, toolVersion: pendingToolVersion.trim(), file }]);
+    if (mayaAttachments.some((attachment) => attachment.toolName === effectiveToolName)) {
+      setStatus({ type: 'error', message: `A ${effectiveToolName} result is already attached. Remove it before choosing a replacement.` });
+      return;
+    }
+    setMayaAttachments((current) => [...current, { toolName: effectiveToolName, toolVersion: pendingToolVersion.trim(), file }]);
     setPendingToolVersion('');
+    if (pendingTool === 'custom') setCustomToolName('');
     setStatus({ type: 'idle', message: '' });
   };
 
@@ -312,7 +319,8 @@ export function OrganismSubmissionForm({ surveillanceMode = false }: { surveilla
 
           <Section title="MAYA Pipeline Results (Optional)" />
           <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_1fr_1.3fr]">
-            <SelectField label="MAYA Tool" value={pendingTool} onChange={setPendingTool} options={MAYA_TOOLS.map((tool) => ({ value: tool, label: tool }))} />
+            <SelectField label="MAYA Tool" value={pendingTool} onChange={setPendingTool} options={MAYA_TOOLS.map((tool) => ({ value: tool, label: tool === 'custom' ? 'Custom tool...' : tool }))} />
+            {pendingTool === 'custom' && <Field label="Custom Tool Name" value={customToolName} onChange={setCustomToolName} />}
             <Field label="Tool Version" value={pendingToolVersion} onChange={setPendingToolVersion} />
             <label className="block">
               <span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Result File</span>

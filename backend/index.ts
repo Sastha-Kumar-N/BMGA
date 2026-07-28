@@ -1097,6 +1097,7 @@ function submissionDetailInclude(includeInternalNotes: boolean) {
         errorMessage: true,
         createdAt: true,
         updatedAt: true,
+        checkpointedAt: true,
         ingestedAt: true,
       },
     },
@@ -1122,6 +1123,21 @@ function submissionDetailInclude(includeInternalNotes: boolean) {
 
 function reviewNoteValue(value: unknown) {
   return sanitizeContactText(value, 4000, true);
+}
+
+function isSupportedOrCustomTool(toolName: string) {
+  return TOOL_KEYS.includes(toolName as typeof TOOL_KEYS[number]) || /^[a-z][a-z0-9_]{1,79}$/.test(toolName);
+}
+
+function canEditSubmissionResults(req: AuthenticatedRequest, submittedById: string) {
+  return submittedById === req.user?.userId
+    || req.user?.role === UserRole.MODERATOR
+    || req.user?.role === UserRole.ADMIN;
+}
+
+function canAmendApprovedSubmission(req: AuthenticatedRequest, submittedById: string) {
+  if (req.user?.role === UserRole.ADMIN || req.user?.role === UserRole.MODERATOR) return true;
+  return submittedById === req.user?.userId && req.user?.role === UserRole.CONTRIBUTOR;
 }
 
 async function recordSubmissionStatusHistory(options: {
@@ -1258,6 +1274,7 @@ function buildSubmissionResponse<T extends {
     errorMessage: string | null;
     createdAt: Date;
     updatedAt: Date;
+    checkpointedAt: Date;
     ingestedAt: Date | null;
   }>;
   genomeReferences?: Array<{
@@ -1287,6 +1304,7 @@ function buildSubmissionResponse<T extends {
     errorMessage: file.errorMessage,
     uploadedAt: file.createdAt,
     updatedAt: file.updatedAt,
+    checkpointedAt: file.checkpointedAt,
     ingestedAt: file.ingestedAt,
     downloadPath: `/submissions/${upload.id}/files/${file.id}/download`,
     viewPath: `/submissions/${upload.id}/files/${file.id}/view`,
@@ -1348,9 +1366,12 @@ function parseDelimitedFile(fileContent: string, fileName: string) {
 
   const delimiter = fileName.toLowerCase().endsWith('.csv') ? ',' : '\t';
   const lines = trimmed.split(/\r?\n/).filter(Boolean);
-  const columns = lines[0]?.split(delimiter).map((value) => value.trim()) || [];
+  const splitLine = (line: string) => fileName.toLowerCase().endsWith('.dat')
+    ? line.trim().split(/\s+/)
+    : line.split(delimiter).map((value) => value.trim());
+  const columns = splitLine(lines[0] || '');
   const rows = lines.slice(1).map((line) => {
-    const values = line.split(delimiter).map((value) => value.trim());
+    const values = splitLine(line);
     return columns.reduce<Record<string, string>>((row, column, index) => {
       row[column || `column_${index + 1}`] = values[index] || "";
       return row;
@@ -1380,6 +1401,8 @@ function parseFlexibleSummary(fileName: string, fileContent: string, existingSum
   const interestingKeys = new Set([
     'genome_size',
     'genome size',
+    'genome_length',
+    'genome length',
     'total_length',
     'total length',
     'gc_percent',
@@ -1389,6 +1412,7 @@ function parseFlexibleSummary(fileName: string, fileContent: string, existingSum
     'l50',
     'contigs',
     'contig_count',
+    'total_contigs',
     'completeness',
     'contamination',
     'cds',
@@ -1406,8 +1430,15 @@ function parseFlexibleSummary(fileName: string, fileContent: string, existingSum
     const rawKey = match[1].trim().toLowerCase().replace(/[\s./%-]+/g, '_');
     const rawValue = match[2].trim();
     const numeric = Number(rawValue.replace(/[,xX%]/g, ''));
+    const normalizedValue = Number.isFinite(numeric) ? numeric : rawValue.slice(0, 240);
     if (interestingKeys.has(rawKey)) {
-      parsed[rawKey] = Number.isFinite(numeric) ? numeric : rawValue.slice(0, 240);
+      parsed[rawKey] = normalizedValue;
+      if (['genome_size', 'genome_length', 'total_length'].includes(rawKey)) parsed.genome_size = normalizedValue;
+      if (['gc', 'gc_content'].includes(rawKey)) parsed.gc_percent = normalizedValue;
+      if (['contigs', 'total_contigs'].includes(rawKey)) parsed.contig_count = normalizedValue;
+      if (rawKey === 'cds') parsed.cds_count = normalizedValue;
+      if (rawKey === 'trna') parsed.trna_count = normalizedValue;
+      if (rawKey === 'rrna') parsed.rrna_count = normalizedValue;
       continue;
     }
     if (Number.isFinite(numeric) && /(size|length|count|coverage|gc|identity|score|total|n50|l50|completeness|contamination|trna|rrna|cds|bgc|domain)/i.test(rawKey)) {
@@ -2339,32 +2370,39 @@ app.post('/api/organism-uploads/:id/maya-files', importRateLimiter, requireAuth,
     });
     if (!upload) return res.status(404).json({ error: 'Organism upload not found' });
 
-    const isOwner = upload.submittedById === req.user?.userId;
-    const isAdmin = req.user?.role === UserRole.ADMIN;
-    if (!isOwner && !isAdmin) {
+    if (!canEditSubmissionResults(req, upload.submittedById)) {
       await writeAdminLog(req.user?.userId, 'SUBMISSION_FILE_UPLOAD_DENIED', 'OrganismUpload', submissionId, {
         result: 'failure',
         statusCode: 403,
       });
       return res.status(403).json({ error: 'You are not allowed to add files to this submission' });
     }
-    if (upload.status !== ApprovalStatus.PENDING && upload.status !== ApprovalStatus.NEEDS_CHANGES) {
-      return res.status(409).json({ error: 'MAYA files can only be added while a submission is pending or needs changes' });
+    const isApprovedAmendment = upload.status === ApprovalStatus.APPROVED;
+    if (upload.status !== ApprovalStatus.PENDING && upload.status !== ApprovalStatus.NEEDS_CHANGES && !isApprovedAmendment) {
+      return res.status(409).json({ error: 'MAYA files can only be added while a submission is pending, needs changes, or is an approved contributor amendment.' });
+    }
+    if (isApprovedAmendment && !canAmendApprovedSubmission(req, upload.submittedById)) {
+      await writeAdminLog(req.user?.userId, 'SUBMISSION_RESULT_AMENDMENT_DENIED', 'OrganismUpload', submissionId, {
+        result: 'failure',
+        reason: 'contributor_or_moderator_role_required',
+        statusCode: 403,
+      });
+      return res.status(403).json({ error: 'Approved submissions can be amended only by their Contributor owner, a Moderator, or an Admin.' });
     }
     if (upload._count.files >= 30) {
       return res.status(409).json({ error: 'A submission can contain at most 30 MAYA result files' });
     }
 
     const normalizedTool = normalizeToolName(textValue(req.body?.toolName, 100) || '');
-    if (!TOOL_KEYS.includes(normalizedTool as typeof TOOL_KEYS[number])) {
-      return res.status(400).json({ error: 'Select a supported MAYA tool for this file' });
+    if (!isSupportedOrCustomTool(normalizedTool)) {
+      return res.status(400).json({ error: 'Provide a valid MAYA tool name using letters, numbers, and underscores.' });
     }
     const existingToolFile = await prisma.submissionFile.findFirst({
       where: { submissionId, toolName: normalizedTool },
       select: { id: true },
     });
     if (existingToolFile) {
-      return res.status(409).json({ error: 'This submission already has a file for that MAYA tool. Remove it before uploading a replacement.' });
+      return res.status(409).json({ error: 'This submission already has a checkpoint for that MAYA tool. Use the replacement action to update it.' });
     }
     const validatedFile = validateImportFile(req.body?.fileName, req.body?.fileContent);
     if ('error' in validatedFile) return res.status(400).json({ error: validatedFile.error });
@@ -2387,7 +2425,7 @@ app.post('/api/organism-uploads/:id/maya-files', importRateLimiter, requireAuth,
         checksumSha256,
         storagePath: storedPath,
         toolVersion: textValue(req.body?.toolVersion, 120),
-        summary: parseJsonObject(req.body?.summary) as Prisma.InputJsonValue,
+        summary: parseFlexibleSummary(validatedFile.fileName, validatedFile.fileContent, req.body?.summary) as Prisma.InputJsonValue,
         warnings: parseJsonArray(req.body?.warnings) as Prisma.InputJsonValue,
         errors: parseJsonArray(req.body?.errors) as Prisma.InputJsonValue,
       },
@@ -2400,9 +2438,24 @@ app.post('/api/organism-uploads/:id/maya-files', importRateLimiter, requireAuth,
         checksumSha256: true,
         toolVersion: true,
         status: true,
+        checkpointedAt: true,
         createdAt: true,
       },
     });
+
+    if (isApprovedAmendment) {
+      await prisma.organismUpload.update({
+        where: { id: submissionId },
+        data: { status: ApprovalStatus.PENDING, reviewedById: null, reviewedAt: null },
+      });
+      await recordSubmissionStatusHistory({
+        submissionId,
+        status: 'RESULT_AMENDMENT_SUBMITTED',
+        actorId: req.user?.userId,
+        note: `${file.toolName} result checkpoint added. The published record remains unchanged until an administrator approves this amendment.`,
+        visibleToSubmitter: true,
+      });
+    }
 
     await writeAdminLog(req.user?.userId, 'SUBMISSION_MAYA_FILE_UPLOADED', 'OrganismUpload', submissionId, {
       fileId: file.id,
@@ -2411,7 +2464,12 @@ app.post('/api/organism-uploads/:id/maya-files', importRateLimiter, requireAuth,
       fileSizeBytes: file.fileSizeBytes,
       storageDriver: configuredStorageDriver(),
     });
-    res.status(201).json({ message: 'MAYA result file attached for admin review', file });
+    res.status(201).json({
+      message: isApprovedAmendment
+        ? 'MAYA result checkpoint saved and returned to the admin review queue.'
+        : 'MAYA result checkpoint saved for admin review.',
+      file,
+    });
   } catch (error) {
     if (storedPath) await deleteStoredFiles([storedPath]);
     logEvent('error', 'submission_file_upload_failed', {
@@ -2420,6 +2478,104 @@ app.post('/api/organism-uploads/:id/maya-files', importRateLimiter, requireAuth,
       error: safeErrorMessage(error, 'Submission file upload failed'),
     });
     res.status(500).json({ error: 'Failed to attach MAYA result file' });
+  }
+});
+
+app.put('/api/organism-uploads/:submissionId/maya-files/:fileId', importRateLimiter, requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const submissionId = parseStringParam(req.params.submissionId);
+  const fileId = parseStringParam(req.params.fileId);
+  let storedPath: string | undefined;
+
+  try {
+    const file = await prisma.submissionFile.findFirst({
+      where: { id: fileId, submissionId },
+      include: { submission: { select: { submittedById: true, status: true } } },
+    });
+    if (!file) return res.status(404).json({ error: 'Submission result checkpoint not found' });
+
+    if (!canEditSubmissionResults(req, file.submission.submittedById)) {
+      await writeAdminLog(req.user?.userId, 'SUBMISSION_RESULT_CHECKPOINT_EDIT_DENIED', 'OrganismUpload', submissionId, {
+        result: 'failure',
+        fileId,
+        statusCode: 403,
+      });
+      return res.status(403).json({ error: 'You are not allowed to replace this result checkpoint' });
+    }
+
+    const isApprovedAmendment = file.submission.status === ApprovalStatus.APPROVED;
+    if (file.submission.status !== ApprovalStatus.PENDING && file.submission.status !== ApprovalStatus.NEEDS_CHANGES && !isApprovedAmendment) {
+      return res.status(409).json({ error: 'This result checkpoint cannot be changed in the current review state' });
+    }
+    if (isApprovedAmendment && !canAmendApprovedSubmission(req, file.submission.submittedById)) {
+      return res.status(403).json({ error: 'Approved submissions can be amended only by their Contributor owner, a Moderator, or an Admin.' });
+    }
+
+    const requestedTool = normalizeToolName(textValue(req.body?.toolName, 100) || file.toolName);
+    if (!isSupportedOrCustomTool(requestedTool)) {
+      return res.status(400).json({ error: 'Provide a valid MAYA tool name using letters, numbers, and underscores.' });
+    }
+    const validatedFile = validateImportFile(req.body?.fileName, req.body?.fileContent);
+    if ('error' in validatedFile) return res.status(400).json({ error: validatedFile.error });
+
+    storedPath = await saveSubmissionResultFile({
+      submissionId,
+      toolName: requestedTool,
+      fileName: validatedFile.fileName,
+      fileContent: validatedFile.fileContent,
+    });
+    const replacement = await prisma.submissionFile.update({
+      where: { id: fileId },
+      data: {
+        toolName: requestedTool,
+        originalFileName: validatedFile.fileName,
+        fileType: path.extname(validatedFile.fileName).replace('.', '').toLowerCase() || 'txt',
+        fileSizeBytes: Buffer.byteLength(validatedFile.fileContent, 'utf8'),
+        checksumSha256: createHash('sha256').update(validatedFile.fileContent, 'utf8').digest('hex'),
+        storagePath: storedPath,
+        toolVersion: textValue(req.body?.toolVersion, 120),
+        summary: parseFlexibleSummary(validatedFile.fileName, validatedFile.fileContent, req.body?.summary) as Prisma.InputJsonValue,
+        warnings: parseJsonArray(req.body?.warnings) as Prisma.InputJsonValue,
+        errors: parseJsonArray(req.body?.errors) as Prisma.InputJsonValue,
+        status: SubmissionFileStatus.UPLOADED,
+        errorMessage: null,
+        ingestedAt: null,
+        checkpointedAt: new Date(),
+      },
+      select: { id: true, toolName: true, originalFileName: true, status: true, checkpointedAt: true },
+    });
+
+    if (isApprovedAmendment) {
+      await prisma.organismUpload.update({
+        where: { id: submissionId },
+        data: { status: ApprovalStatus.PENDING, reviewedById: null, reviewedAt: null },
+      });
+      await recordSubmissionStatusHistory({
+        submissionId,
+        status: 'RESULT_AMENDMENT_SUBMITTED',
+        actorId: req.user?.userId,
+        note: `${replacement.toolName} result checkpoint replaced. The existing public result stays published until this amendment is approved.`,
+        visibleToSubmitter: true,
+      });
+    }
+
+    if (file.storagePath !== storedPath) await deleteStoredFiles([file.storagePath]);
+    await writeAdminLog(req.user?.userId, 'SUBMISSION_RESULT_CHECKPOINT_REPLACED', 'OrganismUpload', submissionId, {
+      result: 'success',
+      fileId,
+      previousToolName: file.toolName,
+      toolName: replacement.toolName,
+      fileName: replacement.originalFileName,
+    });
+    res.json({ message: 'MAYA result checkpoint replaced and saved for review.', file: replacement });
+  } catch (error) {
+    if (storedPath) await deleteStoredFiles([storedPath]);
+    logEvent('error', 'submission_result_checkpoint_replace_failed', {
+      submissionId,
+      fileId,
+      requestId: currentContext()?.requestId,
+      error: safeErrorMessage(error, 'Submission result checkpoint replacement failed'),
+    });
+    res.status(500).json({ error: 'Failed to replace MAYA result checkpoint' });
   }
 });
 
@@ -4568,7 +4724,9 @@ app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req:
       status: status || "completed",
       version,
       finishedAt: new Date(),
-      summary: parseJsonObject(summary),
+      summary: validatedFile
+        ? parseFlexibleSummary(validatedFile.fileName, validatedFile.fileContent, summary)
+        : parseJsonObject(summary),
       tables: parsedTable.columns.length ? [{
         tableName: tableName || `${toolName} results`,
         columns: parsedTable.columns,

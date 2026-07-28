@@ -46,6 +46,7 @@ export type SubmissionFile = {
   fileType?: string | null;
   fileSizeBytes?: number | null;
   uploadedAt?: string | null;
+  checkpointedAt?: string | null;
   processingStatus?: string | null;
   checksum?: string | null;
   errorMessage?: string | null;
@@ -117,6 +118,7 @@ export function SubmissionFilesPanel({ files, title = 'Uploaded Files', eyebrow 
               <p className="mt-1 text-xs font-bold text-slate-500">
                 {file.kind ? `${file.kind} | ` : file.toolName ? `${file.toolName}${file.toolVersion ? ` ${file.toolVersion}` : ''} | ` : ''}{file.fileType || 'N/A'} | {formatBytes(file.fileSizeBytes)} | {file.processingStatus || 'N/A'}
               </p>
+              {file.checkpointedAt && <p className="mt-1 text-[11px] font-semibold text-slate-400">Checkpoint saved {new Date(file.checkpointedAt).toLocaleString()}</p>}
               {file.checksum && <p className="mt-1 break-all font-mono text-[11px] font-semibold text-slate-400">SHA256: {file.checksum}</p>}
               {file.errorMessage && <p className="mt-2 text-xs font-bold text-red-700">{file.errorMessage}</p>}
             </div>

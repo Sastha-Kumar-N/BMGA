@@ -16,19 +16,25 @@ const SUMMARY_FIELDS = [
   ["domain_hit_count", "Domain Hits", Fingerprint],
 ] as const;
 
-function formatMetric(value: unknown) {
-  if (value === null || value === undefined || value === "") return "N/A";
-  if (typeof value === "number") return value.toLocaleString();
-  return String(value);
+function hasMetric(value: unknown) {
+  return value !== null && value !== undefined && value !== "";
 }
 
-function metricState(value: unknown) {
-  return value === null || value === undefined || value === "" ? "No data" : "Ready";
+function formatMetric(value: unknown) {
+  if (typeof value === "number") return value.toLocaleString();
+  return String(value);
 }
 
 export default function GenomeSummaryPanel({ results }: { results: OrganismResultsResponse }) {
   const { organism, summary } = results;
   const displayName = organism.displayName || organism.name;
+  const availableSummaryFields = SUMMARY_FIELDS.filter(([key]) => hasMetric(summary[key]));
+  const availableMetadata = [
+    [Dna, "text-orange-300", "Strain", organism.strain],
+    [Database, "text-sky-300", "Assembly", organism.assembly_accession],
+    [BarChart3, "text-emerald-300", "BioSample", organism.biosample],
+    [MapPin, "text-rose-300", "Source", organism.source],
+  ] as const;
 
   return (
     <section className="relative overflow-hidden rounded-[34px] bg-[#0B1B3A] p-6 text-white shadow-2xl shadow-slate-300/50 lg:p-8">
@@ -50,46 +56,33 @@ export default function GenomeSummaryPanel({ results }: { results: OrganismResul
           </div>
 
           <div className="grid gap-3 text-sm font-bold text-slate-200">
-            <MetaRow icon={Dna} iconClass="text-orange-300" label="Strain" value={organism.strain} />
-            <MetaRow icon={Database} iconClass="text-sky-300" label="Assembly" value={organism.assembly_accession} />
-            <MetaRow icon={BarChart3} iconClass="text-emerald-300" label="BioSample" value={organism.biosample} />
-            <MetaRow icon={MapPin} iconClass="text-rose-300" label="Source" value={organism.source} />
+            {availableMetadata.filter(([, , , value]) => hasMetric(value)).map(([Icon, iconClass, label, value]) => (
+              <MetaRow key={label} icon={Icon} iconClass={iconClass} label={label} value={value} />
+            ))}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-          {SUMMARY_FIELDS.map(([key, label, Icon]) => {
+          {availableSummaryFields.map(([key, label, Icon]) => {
             const value = summary[key];
-            const isMissing = value === null || value === undefined || value === "";
 
             return (
               <div
                 key={key}
-                className={`group rounded-2xl border p-4 shadow-sm transition ${
-                  isMissing
-                    ? "border-white/10 bg-white/[0.035]"
-                    : "border-white/15 bg-white/[0.075] hover:border-orange-300/40 hover:bg-white/[0.11]"
-                }`}
+                className="group rounded-2xl border border-white/15 bg-white/[0.075] p-4 shadow-sm transition hover:border-orange-300/40 hover:bg-white/[0.11]"
               >
                 <div className="mb-3 flex items-center justify-between gap-2">
-                  <span className={`rounded-xl p-2 ${isMissing ? "bg-white/5 text-slate-500" : "bg-orange-400/15 text-orange-200"}`}>
+                  <span className="rounded-xl bg-orange-400/15 p-2 text-orange-200">
                     <Icon size={16} />
                   </span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${
-                      isMissing ? "bg-white/5 text-slate-500" : "bg-emerald-400/10 text-emerald-200"
-                    }`}
-                  >
-                    {metricState(value)}
-                  </span>
+                  <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-200">Ready</span>
                 </div>
                 <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">{label}</p>
-                <p className={`mt-1 truncate font-mono text-lg font-black ${isMissing ? "text-slate-500" : "text-white"}`}>
-                  {formatMetric(value)}
-                </p>
+                <p className="mt-1 truncate font-mono text-lg font-black text-white">{formatMetric(value)}</p>
               </div>
             );
           })}
+          {!availableSummaryFields.length && <p className="col-span-full rounded-2xl border border-white/10 bg-white/[0.055] p-5 text-sm font-bold text-slate-300">No computed genome metrics are available yet. Approved tool checkpoints will appear here after they are ingested.</p>}
         </div>
       </div>
     </section>
