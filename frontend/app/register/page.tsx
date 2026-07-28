@@ -58,7 +58,7 @@ export default function RegisterPage() {
       <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl items-center gap-10 lg:grid-cols-[0.95fr_1.05fr]">
         <section>
           <Link href="/" className="inline-flex min-w-0 items-center gap-3" aria-label={`${BRAND_FULL_NAME} home`}>
-            <BrandLogo size="sm" />
+            <BrandLogo size="sm" homeLink={false} />
           </Link>
           <h1 className="mt-8 max-w-xl text-5xl font-black leading-tight tracking-tight md:text-6xl">
             Create a verified organism data account.

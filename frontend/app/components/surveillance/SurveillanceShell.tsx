@@ -54,8 +54,8 @@ export default function SurveillanceShell({ children }: { children: ReactNode })
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#07172f] text-white shadow-lg">
         <div className="mx-auto flex min-h-16 max-w-[1600px] items-center gap-4 px-4 sm:px-6">
           <Link href="/" aria-label="Bharat Microbial Genome Atlas home" className="min-w-0 shrink-0">
-            <span className="sm:hidden"><BrandLogo variant="light" size="sm" showText={false} /></span>
-            <span className="hidden sm:inline-flex"><BrandLogo variant="light" size="sm" /></span>
+            <span className="sm:hidden"><BrandLogo variant="light" size="sm" showText={false} homeLink={false} /></span>
+            <span className="hidden sm:inline-flex"><BrandLogo variant="light" size="sm" homeLink={false} /></span>
           </Link>
           <nav aria-label="Portal navigation" className="ml-auto hidden items-center gap-1 xl:flex">
             {portalLinks.map((link) => {

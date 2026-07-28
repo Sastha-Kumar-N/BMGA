@@ -68,7 +68,7 @@ export default function HomeNavigation({ genomeHref }: { genomeHref: string }) {
       <header className="sticky top-0 z-[900] border-b border-white/10 bg-[#06152e]/97 text-white shadow-lg shadow-black/10 backdrop-blur-xl">
         <div className="mx-auto flex h-[76px] max-w-[1440px] items-center justify-between gap-5 px-4 sm:px-6 lg:px-8">
           <Link href="/#home" aria-label="Bharat Microbial Genome Atlas home" onClick={() => setMenuOpen(false)}>
-            <BrandLogo variant="light" size="sm" />
+            <BrandLogo variant="light" size="sm" homeLink={false} />
           </Link>
 
           <nav aria-label="Primary navigation" className="hidden items-stretch self-stretch xl:flex">

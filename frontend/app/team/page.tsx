@@ -107,6 +107,11 @@ const researchMembers: CoreMember[] = [
   },
 ];
 
+const coreTeamMembers = [
+  ...leadershipMembers.map((member) => ({ member, section: 'Scientific Leadership' })),
+  ...researchMembers.map((member) => ({ member, section: 'Platform Development' })),
+];
+
 const studentMembers: StudentMember[] = [
   { name: 'Aditya', program: 'MSc Bioinformatics', affiliation: 'Amrita School of Biotechnology' },
   { name: 'Lekshmi', program: 'MSc Bioinformatics', affiliation: 'Amrita School of Biotechnology' },
@@ -192,9 +197,8 @@ export default function AboutUsPage() {
               <h2 className="text-3xl font-black sm:text-4xl">Scientific leadership and platform development</h2>
               <p className="mt-4 text-base font-semibold leading-7 text-slate-600">Meet the scientific leadership, developers, and research contributors behind BMGA.</p>
             </div>
-            <div className="mt-10 space-y-6">
-              {leadershipMembers.map((member) => <MemberProfile key={member.name} member={member} section="Leadership" />)}
-              {researchMembers.map((member) => <MemberProfile key={member.name} member={member} section="Development & Research" reverse />)}
+            <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {coreTeamMembers.map(({ member, section }) => <MemberTile key={member.name} member={member} section={section} />)}
             </div>
           </div>
         </section>
@@ -240,23 +244,23 @@ function OrganizationProfile({ organization }: { organization: OrganizationPartn
   );
 }
 
-function MemberProfile({ member, section, reverse = false }: { member: CoreMember; section: string; reverse?: boolean }) {
+function MemberTile({ member, section }: { member: CoreMember; section: string }) {
   const Icon = member.icon;
   return (
-    <article className={`grid overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm ${reverse ? 'lg:grid-cols-[minmax(0,1fr)_300px] lg:[&>*:first-child]:order-2' : 'lg:grid-cols-[300px_minmax(0,1fr)]'}`}>
-      <div className="relative min-h-72 bg-[#0B1B3A] lg:min-h-80">
+    <article className="flex h-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg">
+      <div className="relative aspect-[4/3] bg-[#0B1B3A]">
         {member.portraitSrc ? (
-          <Image src={member.portraitSrc} alt={member.portraitAlt} fill sizes="(max-width: 1024px) 100vw, 300px" className="object-cover" />
+          <Image src={member.portraitSrc} alt={member.portraitAlt} fill sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw" className="object-cover" />
         ) : (
-          <div role="img" aria-label={member.portraitAlt} className="flex h-full min-h-72 items-center justify-center text-orange-300"><Icon size={74} /></div>
+          <div role="img" aria-label={member.portraitAlt} className="flex h-full items-center justify-center text-orange-300"><Icon size={74} /></div>
         )}
       </div>
-      <div className="p-6 md:p-8">
+      <div className="flex flex-1 flex-col p-6">
         <p className="text-xs font-black uppercase text-orange-600">{section}</p>
-        <h3 className="mt-3 text-3xl font-black">{member.name}</h3>
+        <h3 className="mt-3 text-2xl font-black">{member.name}</h3>
         <p className="mt-3 flex items-start gap-2 text-sm font-black text-slate-700"><Building2 className="mt-0.5 shrink-0 text-teal-700" size={16} />{member.title}</p>
         {member.affiliation && <p className="mt-2 flex items-start gap-2 text-sm font-semibold text-slate-500"><BookOpenCheck className="mt-0.5 shrink-0 text-teal-700" size={16} />{member.affiliation}</p>}
-        {member.bio && <p className="mt-5 max-w-4xl text-sm font-semibold leading-7 text-slate-600">{member.bio}</p>}
+        {member.bio && <p className="mt-5 text-sm font-semibold leading-7 text-slate-600">{member.bio}</p>}
         {member.expertise?.length ? <div className="mt-5 flex flex-wrap gap-2">{member.expertise.map((item) => <span key={item} className="rounded-md bg-slate-100 px-3 py-2 text-[10px] font-black uppercase text-slate-600">{item}</span>)}</div> : null}
         {member.email && <a href={`mailto:${member.email}`} className="mt-6 inline-flex min-h-11 items-center gap-2 text-sm font-black text-orange-700 hover:text-[#0B1B3A]"><Mail size={16} />{member.email}</a>}
       </div>

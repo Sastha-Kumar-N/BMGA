@@ -512,7 +512,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Link href="/" className="inline-flex min-w-0 items-center gap-3" aria-label={`${BRAND_FULL_NAME} home`}>
-            <BrandLogo size="sm" />
+            <BrandLogo size="sm" homeLink={false} />
           </Link>
           <div className="flex flex-wrap gap-2">
             <Link href="/" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#0B1B3A] shadow-sm transition hover:border-orange-300 hover:text-orange-600">
