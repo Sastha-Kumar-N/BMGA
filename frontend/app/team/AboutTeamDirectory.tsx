@@ -102,8 +102,8 @@ export default function AboutTeamDirectory() {
 function MemberCard({ member, section }: { member: TeamMember; section: TeamSection }) {
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg">
-      <div className="relative aspect-[4/3] bg-[#0B1B3A]">
-        {member.portraitSrc ? <Image src={member.portraitSrc} alt={`Portrait of ${member.name}`} fill sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw" className="object-cover" /> : <div role="img" aria-label={`Portrait placeholder for ${member.name}`} className="flex h-full items-center justify-center text-orange-300"><UserRound size={74} /></div>}
+      <div className="bg-[#0B1B3A]">
+        {member.portraitSrc ? <Image src={member.portraitSrc} alt={`Portrait of ${member.name}`} width={1200} height={900} sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw" className="h-auto w-full rounded-t-lg object-contain" priority /> : <div role="img" aria-label={`Portrait placeholder for ${member.name}`} className="flex min-h-56 items-center justify-center text-orange-300"><UserRound size={74} /></div>}
       </div>
       <div className="flex flex-1 flex-col p-6">
         <p className="text-xs font-black uppercase text-orange-600">{section === 'LEADERSHIP' ? 'Scientific leadership' : 'Platform development'}</p>

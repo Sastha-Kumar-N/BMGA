@@ -37,6 +37,7 @@ const portalLinks = [
   { label: 'Home', href: '/' },
   { label: 'India Dashboard', href: '/dashboard' },
   { label: 'Global Surveillance', href: '/surveillance' },
+  { label: 'AMR Findings', href: '/amr-findings-india' },
   { label: 'MAYA Results', href: '/dashboard' },
   { label: 'About', href: '/about' },
 ];
