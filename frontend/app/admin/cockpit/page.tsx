@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertCircle, ArrowRight, BookOpenCheck, ClipboardCheck, Database, FileCheck2, Globe2, History, Inbox, MessageSquare, Plus, Search, ShieldCheck, Trash2, UserCog, UsersRound } from 'lucide-react';
+import { AlertCircle, ArrowRight, BookOpenCheck, ClipboardCheck, Database, FileCheck2, Globe2, History, Inbox, MessageSquare, Plus, Search, ShieldCheck, Trash2, UserCog, UsersRound, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
@@ -234,6 +234,7 @@ export default function AdminCockpitPage() {
       actions: [
         { href: '/admin/uploads', title: 'Organism Review', body: 'Approve, reject, edit, or request changes.', icon: ClipboardCheck },
         { href: '/admin/blogs', title: 'Blog Review', body: `${pendingPosts} posts awaiting approval.`, icon: BookOpenCheck },
+        { href: '/admin/tools', title: 'Tool Catalog', body: 'Enable or retire ingestion tool choices.', icon: Wrench },
       ],
     },
     {
@@ -243,6 +244,7 @@ export default function AdminCockpitPage() {
       tone: 'text-blue-700 bg-blue-50',
       actions: [
         { href: '/admin/users', title: 'Registered Users', body: `${userCount} accounts in the portal.`, icon: UsersRound },
+        { href: '/admin/about-team', title: 'About Us Team', body: 'Add, edit, or remove leadership, platform, and student profiles.', icon: UsersRound },
       ],
     },
     {

@@ -11,6 +11,7 @@ FROM deps AS builder
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+ARG FRONTEND_SOURCE_REVISION=20260729-responsive-dashboard
 COPY . .
 RUN npm run build
 

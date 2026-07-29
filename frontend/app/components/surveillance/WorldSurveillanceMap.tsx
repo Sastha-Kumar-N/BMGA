@@ -8,19 +8,21 @@ import { evidenceLabel, formatDate, type SurveillanceLocation } from './types';
 
 const WORLD_CENTER: [number, number] = [18, 8];
 const WORLD_BOUNDS: LatLngBoundsExpression = [[-62, -178], [78, 178]];
-const WORLD_TILE_OPTIONS = { noWrap: true };
-const WORLD_MAP_OPTIONS = { maxBounds: [[-90, -180], [90, 180]] as LatLngBoundsExpression, maxBoundsViscosity: 1 };
 
 function MapViewport({ locations }: { locations: SurveillanceLocation[] }) {
   const map = useMap();
 
   useEffect(() => {
+    map.invalidateSize({ animate: false });
+    const handleResize = () => map.invalidateSize({ animate: false });
+    window.addEventListener('resize', handleResize);
     if (locations.length <= 1) {
-      map.fitBounds(WORLD_BOUNDS, { padding: [8, 8], maxZoom: 2 });
-      return;
+      map.fitBounds(WORLD_BOUNDS, { padding: [20, 20], maxZoom: 2 });
+    } else {
+      const bounds = locations.map((location) => [location.latitude, location.longitude]) as LatLngBoundsExpression;
+      map.fitBounds(bounds, { padding: [42, 42], maxZoom: 5 });
     }
-    const bounds = locations.map((location) => [location.latitude, location.longitude]) as LatLngBoundsExpression;
-    map.fitBounds(bounds, { padding: [42, 42], maxZoom: 5 });
+    return () => window.removeEventListener('resize', handleResize);
   }, [locations, map]);
   return null;
 }
@@ -46,14 +48,13 @@ export default function WorldSurveillanceMap({
   limit?: number;
 }) {
   return (
-    <section id="global-map" aria-labelledby="global-map-title" className="relative min-h-[390px] overflow-hidden border border-slate-200 bg-[#dceff3] lg:min-h-[520px]">
+    <section id="global-map" aria-labelledby="global-map-title" className="relative h-[clamp(420px,58vh,680px)] overflow-hidden border border-slate-200 bg-[#dceff3]">
       <div className="absolute right-4 top-4 z-[500] max-w-[calc(100%-5rem)] rounded-md border border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
         <h2 id="global-map-title" className="text-sm font-black">Global record map</h2>
         <p className="mt-0.5 text-xs font-semibold text-slate-500">{locations.length.toLocaleString('en-IN')} geocoded records in view</p>
       </div>
-      <MapContainer {...WORLD_MAP_OPTIONS} center={WORLD_CENTER} zoom={2} minZoom={1} maxZoom={12} scrollWheelZoom={false} className="h-full min-h-[390px] w-full lg:min-h-[520px]" style={{ height: '100%', width: '100%' }}>
+        <MapContainer center={WORLD_CENTER} zoom={2} minZoom={1} maxZoom={18} scrollWheelZoom zoomControl className="h-full w-full" style={{ height: '100%', width: '100%' }}>
         <TileLayer
-          {...WORLD_TILE_OPTIONS}
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors"
           maxZoom={19}

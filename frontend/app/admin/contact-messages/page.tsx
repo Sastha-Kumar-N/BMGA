@@ -13,6 +13,7 @@ import {
   RefreshCcw,
   Reply,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 
@@ -150,6 +151,25 @@ export default function AdminContactMessagesPage() {
       await loadMessages();
     } catch (error) {
       setStatus({ type: 'error', text: error instanceof Error ? error.message : 'Failed to save admin notes' });
+    }
+  };
+
+  const deleteSelected = async () => {
+    if (!selected || !window.confirm(`Delete the message from ${selected.name}? It will be removed from the inbox but retained as an archived audit record.`)) return;
+    setStatus({ type: 'loading', text: 'Deleting contact message...' });
+    try {
+      const response = await fetch(apiPath(`/admin/contact-messages/${selected.id}`), {
+        method: 'DELETE',
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to delete contact message');
+      setSelected(null);
+      setSelectedId('');
+      setStatus({ type: 'success', text: data.message || 'Contact message deleted' });
+      await loadMessages();
+    } catch (error) {
+      setStatus({ type: 'error', text: error instanceof Error ? error.message : 'Failed to delete contact message' });
     }
   };
 
@@ -296,7 +316,7 @@ export default function AdminContactMessagesPage() {
                   />
                 </label>
 
-                <div className="grid gap-3 md:grid-cols-4">
+                <div className="grid gap-3 md:grid-cols-5">
                   <button onClick={() => void updateSelected('read')} disabled={status.type === 'loading'} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-emerald-700 disabled:opacity-50">
                     <MailOpen size={15} /> Mark Read
                   </button>
@@ -308,6 +328,9 @@ export default function AdminContactMessagesPage() {
                   </button>
                   <button onClick={() => void updateSelected('archive')} disabled={status.type === 'loading'} className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-black uppercase tracking-widest text-red-700 hover:bg-red-100 disabled:opacity-50">
                     <Archive size={15} /> Archive
+                  </button>
+                  <button onClick={() => void deleteSelected()} disabled={status.type === 'loading'} className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-700 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-red-800 disabled:opacity-50">
+                    <Trash2 size={15} /> Delete
                   </button>
                 </div>
               </div>

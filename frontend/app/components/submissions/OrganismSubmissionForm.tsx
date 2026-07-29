@@ -20,7 +20,7 @@ type MayaAttachment = {
 type GenomeReferenceAttachments = Partial<Record<'FASTA' | 'GFF3', File>>;
 
 const MAYA_TOOLS = [
-  'abricate', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
+  'abricate', 'amrfinderplus', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
   'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'mlst', 'multiqc',
   'prokka', 'quast', 'rnlst', 'spades', 'trf', 'trnascan', 'custom',
 ];

@@ -36,6 +36,12 @@ enum ContactMessageStatus {
   READ
 }
 
+enum AboutTeamSection {
+  LEADERSHIP
+  PLATFORM
+  STUDENT
+}
+
 enum ToolRunStatus {
   COMPLETED
   FAILED
@@ -427,6 +433,38 @@ model ContactMessage {
   @@index([archived])
   @@index([createdAt])
   @@index([email])
+}
+
+model AboutTeamMember {
+  id           String           @id @default(uuid())
+  section      AboutTeamSection
+  name         String
+  title        String?
+  affiliation  String?
+  contribution String?
+  email        String?
+  course       String?
+  portraitSrc  String?
+  displayOrder Int              @default(0)
+  active       Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([section, active, displayOrder])
+  @@index([active])
+}
+
+model ToolCatalogEntry {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  label       String
+  category    String
+  description String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active, category])
 }
 
 model Assembly {

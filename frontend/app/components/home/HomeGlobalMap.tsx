@@ -46,7 +46,7 @@ function markerColor(location: SurveillanceLocation) {
   return '#2dd4bf';
 }
 
-export default function HomeGlobalMap({ locations }: { locations: SurveillanceLocation[] }) {
+export default function HomeGlobalMap({ locations, resultHrefForOrganism = (organismId: number) => `/organisms/${organismId}/results` }: { locations: SurveillanceLocation[]; resultHrefForOrganism?: (organismId: number) => string }) {
   return (
     <div className="absolute inset-0 z-0 bg-[#06152e]" aria-label="Interactive map of approved global genomic surveillance locations">
       <MapContainer
@@ -103,7 +103,7 @@ export default function HomeGlobalMap({ locations }: { locations: SurveillanceLo
                     <dd>{location.mayaRunCount}</dd>
                   </dl>
                   <a
-                    href={`/organisms/${location.organismId}/results`}
+                    href={resultHrefForOrganism(location.organismId)}
                     className="mt-3 inline-flex min-h-10 items-center bg-[#0B1B3A] px-3 text-xs font-black text-white"
                   >
                     Open genomic results

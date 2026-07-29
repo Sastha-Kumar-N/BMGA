@@ -1,13 +1,10 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
-import type { LucideIcon } from 'lucide-react';
 import {
   ArrowRight,
   BookOpenCheck,
-  BrainCircuit,
   Building2,
-  Code2,
   GraduationCap,
   Handshake,
   Mail,
@@ -18,6 +15,7 @@ import {
 import BrandLogo from '../components/BrandLogo';
 import HomeNavigation from '../components/home/HomeNavigation';
 import { BRAND_FULL_NAME } from '../lib/brand';
+import AboutTeamDirectory from './AboutTeamDirectory';
 
 export const metadata: Metadata = {
   title: `About Us | ${BRAND_FULL_NAME}`,
@@ -31,24 +29,6 @@ type OrganizationPartner = {
   logoSrc: string;
   logoAlt: string;
   accent: 'orange' | 'teal';
-};
-
-type CoreMember = {
-  name: string;
-  title: string;
-  affiliation?: string;
-  bio?: string;
-  email?: string;
-  portraitSrc?: string | null;
-  portraitAlt: string;
-  expertise?: string[];
-  icon: LucideIcon;
-};
-
-type StudentMember = {
-  name: string;
-  program: string;
-  affiliation: string;
 };
 
 const partnerOrganizations: OrganizationPartner[] = [
@@ -68,54 +48,6 @@ const partnerOrganizations: OrganizationPartner[] = [
     logoAlt: 'Sivasakthi Science Foundation logo placeholder',
     accent: 'teal',
   },
-];
-
-const leadershipMembers: CoreMember[] = [
-  {
-    name: 'Dr. Sabarinath Subramaniam',
-    title: 'Director, Sivasakthi Science Foundation (SSF), Adjunct Professor, School of Biotechnology, Amritapuri',
-    bio: "Science leader with over 25 years of experience across Biotechnology, Neuroscience, Bioinformatics, and Plant Genomics. Guides BMGA's scientific vision, research partnerships, data strategy, and long-term roadmap.",
-    email: 'shabari@sivasakthifoundation.org',
-    portraitSrc: '/team/sabarinath-subramaniam.png',
-    portraitAlt: 'Portrait of Dr. Sabarinath Subramaniam',
-    expertise: ['Scientific vision', 'Research partnerships', 'Data strategy'],
-    icon: BrainCircuit,
-  },
-  {
-    name: 'Dr. Nidheesh M.',
-    title: 'Principal, School of Physical Sciences, Amritapuri | Associate Professor, School of Biotechnology, Amritapuri',
-    email: 'nidheesh@am.amrita.edu',
-    portraitSrc: '/team/Dr-Nidheesh-M.png',
-    portraitAlt: 'Portrait of Dr. Nidheesh M.',
-    expertise: ['Administrator', 'Research partnerships', 'Resources and infrastructure'],
-
-    icon: BrainCircuit,
-  },
-];
-
-const researchMembers: CoreMember[] = [
-  {
-    name: 'Sastha Kumar N',
-    title: 'Research Scholar & Developer',
-    affiliation: 'Amrita School of Biotechnology & Sivasakthi Science Foundation',
-    bio: 'PhD Scholar bridging AI and life sciences. Builds data platforms, machine learning workflows, and web tools for genomics, education, agriculture, and health applications. Contributes to BMGA through platform architecture, data integration, user experience design, and computational biology workflows.',
-    email: 'admin@bgdb.org',
-    portraitSrc: '/team/sastha.png',
-    portraitAlt: 'Portrait of Sastha Kumar N',
-    expertise: ['Platform architecture', 'AI and life sciences', 'Computational biology'],
-    icon: Code2,
-  },
-];
-
-const coreTeamMembers = [
-  ...leadershipMembers.map((member) => ({ member, section: 'Scientific Leadership' })),
-  ...researchMembers.map((member) => ({ member, section: 'Platform Development' })),
-];
-
-const studentMembers: StudentMember[] = [
-  { name: 'Aditya', program: 'MSc Bioinformatics', affiliation: 'Amrita School of Biotechnology' },
-  { name: 'Lekshmi', program: 'MSc Bioinformatics', affiliation: 'Amrita School of Biotechnology' },
-  { name: 'Sreerag', program: 'MSc Bioinformatics', affiliation: 'Amrita School of Biotechnology' },
 ];
 
 const collaborationPrinciples = [
@@ -193,24 +125,7 @@ export default function AboutUsPage() {
 
         <section id="team" className="scroll-mt-24 px-5 py-18 md:px-8 lg:py-24">
           <div className="mx-auto max-w-[1320px]">
-            <div className="max-w-3xl">
-              <h2 className="text-3xl font-black sm:text-4xl">Scientific leadership and platform development</h2>
-              <p className="mt-4 text-base font-semibold leading-7 text-slate-600">Meet the scientific leadership, developers, and research contributors behind BMGA.</p>
-            </div>
-            <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-              {coreTeamMembers.map(({ member, section }) => <MemberTile key={member.name} member={member} section={section} />)}
-            </div>
-          </div>
-        </section>
-
-        <section className="border-y border-slate-200 bg-[#f4f7fa] px-5 py-16 md:px-8">
-          <div className="mx-auto max-w-[1320px]">
-            <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-              <div><h2 className="text-3xl font-black">Students</h2><p className="mt-4 text-sm font-semibold leading-6 text-slate-600">Student contributors supporting bioinformatics research and knowledge organization.</p></div>
-              <div className="grid gap-px border border-slate-200 bg-slate-200 sm:grid-cols-3">
-                {studentMembers.map((student) => <StudentProfile key={student.name} student={student} />)}
-              </div>
-            </div>
+            <AboutTeamDirectory />
           </div>
         </section>
 
@@ -240,41 +155,6 @@ function OrganizationProfile({ organization }: { organization: OrganizationPartn
         <Image src={organization.logoSrc} alt={organization.logoAlt} width={140} height={105} className="h-full w-full object-contain" />
       </div>
       <div><h3 className="text-2xl font-black">{organization.name}</h3><p className="mt-3 text-sm font-black leading-6 text-orange-700">{organization.statement}</p><p className="mt-4 text-sm font-semibold leading-7 text-slate-600">{organization.body}</p></div>
-    </article>
-  );
-}
-
-function MemberTile({ member, section }: { member: CoreMember; section: string }) {
-  const Icon = member.icon;
-  return (
-    <article className="flex h-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg">
-      <div className="relative aspect-[4/3] bg-[#0B1B3A]">
-        {member.portraitSrc ? (
-          <Image src={member.portraitSrc} alt={member.portraitAlt} fill sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw" className="object-cover" />
-        ) : (
-          <div role="img" aria-label={member.portraitAlt} className="flex h-full items-center justify-center text-orange-300"><Icon size={74} /></div>
-        )}
-      </div>
-      <div className="flex flex-1 flex-col p-6">
-        <p className="text-xs font-black uppercase text-orange-600">{section}</p>
-        <h3 className="mt-3 text-2xl font-black">{member.name}</h3>
-        <p className="mt-3 flex items-start gap-2 text-sm font-black text-slate-700"><Building2 className="mt-0.5 shrink-0 text-teal-700" size={16} />{member.title}</p>
-        {member.affiliation && <p className="mt-2 flex items-start gap-2 text-sm font-semibold text-slate-500"><BookOpenCheck className="mt-0.5 shrink-0 text-teal-700" size={16} />{member.affiliation}</p>}
-        {member.bio && <p className="mt-5 text-sm font-semibold leading-7 text-slate-600">{member.bio}</p>}
-        {member.expertise?.length ? <div className="mt-5 flex flex-wrap gap-2">{member.expertise.map((item) => <span key={item} className="rounded-md bg-slate-100 px-3 py-2 text-[10px] font-black uppercase text-slate-600">{item}</span>)}</div> : null}
-        {member.email && <a href={`mailto:${member.email}`} className="mt-6 inline-flex min-h-11 items-center gap-2 text-sm font-black text-orange-700 hover:text-[#0B1B3A]"><Mail size={16} />{member.email}</a>}
-      </div>
-    </article>
-  );
-}
-
-function StudentProfile({ student }: { student: StudentMember }) {
-  return (
-    <article className="bg-white p-5">
-      <GraduationCap className="text-teal-700" size={25} />
-      <h3 className="mt-5 text-lg font-black">{student.name}</h3>
-      <p className="mt-2 text-sm font-black text-orange-700">{student.program}</p>
-      <p className="mt-3 text-xs font-semibold leading-5 text-slate-500">{student.affiliation}</p>
     </article>
   );
 }

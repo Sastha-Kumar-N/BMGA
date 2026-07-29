@@ -35,6 +35,7 @@ type HomeIndiaMapProps = {
   error?: string | null;
   selectedStrainId?: number | null;
   onSelectStrain?: (strainId: number) => void;
+  resultHrefForOrganism?: (organismId: number) => string;
 };
 
 const INDIA_CENTER: LatLngExpression = [22.6, 79.2];
@@ -118,6 +119,7 @@ export default function HomeIndiaMap({
   error = null,
   selectedStrainId = null,
   onSelectStrain,
+  resultHrefForOrganism = (organismId) => `/organisms/${organismId}/results`,
 }: HomeIndiaMapProps) {
   const points = useMemo<HomeMapPoint[]>(() => (
     filterIndianStrains(strains)
@@ -188,7 +190,7 @@ export default function HomeIndiaMap({
                   </div>
                 </div>
                 <a
-                  href={`/organisms/${point.organismId}/results`}
+                  href={resultHrefForOrganism(point.organismId)}
                   className="mt-3 inline-flex min-h-10 w-full items-center justify-center bg-[#0B1B3A] px-3 text-xs font-black text-white transition hover:bg-orange-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500"
                 >
                   Open organism results

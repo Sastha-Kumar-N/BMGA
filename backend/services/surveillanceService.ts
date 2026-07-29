@@ -90,6 +90,8 @@ export async function getSurveillanceOverview(prisma: PrismaClient, filters: Sur
     datedCount,
     recentCount,
     amrCount,
+    amrPositiveStrains,
+    amrFinderPlusRuns,
     completedMayaCount,
     sourceGroups,
     evidenceGroups,
@@ -109,6 +111,8 @@ export async function getSurveillanceOverview(prisma: PrismaClient, filters: Sur
     prisma.strain.count({ where: datedWhere }),
     prisma.strain.count({ where: recentWhere }),
     prisma.amrGene.count({ where: amrWhere }),
+    prisma.amrGene.groupBy({ by: ['strainId'], where: amrWhere }),
+    prisma.toolRun.count({ where: { ...completedMayaWhere, toolName: 'amrfinderplus' } }),
     prisma.toolRun.count({ where: completedMayaWhere }),
     prisma.strain.groupBy({
       by: ['sourceType'],
@@ -165,6 +169,8 @@ export async function getSurveillanceOverview(prisma: PrismaClient, filters: Sur
       organismsTracked: organismGroups.length,
       countriesRepresented: countryGroups.length,
       genotypicAmrDetections: amrCount,
+      amrPositiveStrains: amrPositiveStrains.length,
+      completedAmrFinderPlusRuns: amrFinderPlusRuns,
       completedMayaRuns: completedMayaCount,
     },
     quality: {
@@ -385,7 +391,7 @@ export async function syncAmrGenesFromToolRows(
   toolName: string,
   rows: Record<string, unknown>[],
 ) {
-  if (!strainId || toolName.toLowerCase() !== 'abricate') return 0;
+  if (!strainId || !['abricate', 'amrfinderplus'].includes(toolName.toLowerCase())) return 0;
 
   const detections = rows.flatMap((row) => {
     const normalized = normalizeRow(row);

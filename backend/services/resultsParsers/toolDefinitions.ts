@@ -7,6 +7,7 @@ export type ToolDefinition = {
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
   { key: "abricate", label: "ABRicate", category: "AMR", description: "AMR, virulence, and plasmid database hits" },
+  { key: "amrfinderplus", label: "AMR Finder Plus", category: "AMR", description: "NCBI antimicrobial resistance gene and mutation detection" },
   { key: "antismash", label: "antiSMASH", category: "BGC", description: "Biosynthetic gene cluster predictions" },
   { key: "barrnap", label: "Barrnap", category: "Annotation", description: "rRNA gene predictions" },
   { key: "busco", label: "BUSCO", category: "Quality", description: "Single-copy ortholog completeness" },
@@ -41,6 +42,7 @@ export function normalizeToolName(toolName: string) {
   if (key === "rmlst" || key === "rn_lsts") return "rnlst";
   if (key === "mlst" || key === "m_lst") return "rnlst";
   if (key === "antismash") return "antismash";
+  if (key === "amrfinder_plus" || key === "amr_finder_plus" || key === "amr_finder" || key === "amrfinder") return "amrfinderplus";
 
   return key;
 }

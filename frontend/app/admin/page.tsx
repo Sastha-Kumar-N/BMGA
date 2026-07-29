@@ -105,6 +105,13 @@ type BlastDatabaseStatus = {
   software: string;
 };
 
+type ToolCatalogItem = {
+  key: string;
+  label: string;
+  category: string;
+  description: string;
+};
+
 type AdminTab = {
   id: AdminTabId;
   icon: LucideIcon;
@@ -160,7 +167,7 @@ type OrganismFormState = typeof EMPTY_ORGANISM_FORM;
 type StrainFormState = typeof EMPTY_STRAIN_FORM;
 
 const MAYA_TOOLS = [
-  'abricate', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
+  'abricate', 'amrfinderplus', 'antismash', 'barrnap', 'busco', 'checkm', 'diamond', 'fastp', 'fastqc',
   'fastqc_trimmed', 'hmmer', 'islandpath', 'jellyfish', 'kofam', 'minced', 'mlst', 'rnlst',
   'multiqc', 'prokka', 'quast', 'spades', 'trf', 'trnascan', 'custom',
 ];
@@ -197,6 +204,7 @@ export default function AdminPortal() {
   const [customMayaToolName, setCustomMayaToolName] = useState('');
   const [status, setStatus] = useState<StatusState>({ type: 'idle', message: '' });
   const [loadingRegistry, setLoadingRegistry] = useState(true);
+  const [availableMayaTools, setAvailableMayaTools] = useState<ToolCatalogItem[]>([]);
 
   const [mayaForm, setMayaForm] = useState({
     organismId: '', strainId: '', toolName: 'abricate', runStatus: 'completed', version: '',
@@ -216,10 +224,11 @@ export default function AdminPortal() {
   const fetchData = useCallback(async () => {
     setLoadingRegistry(true);
     try {
-      const [adminRes, orgRes, strainRes] = await Promise.all([
+      const [adminRes, orgRes, strainRes, toolsRes] = await Promise.all([
         fetch(apiPath('/admin/me'), { headers: adminHeaders(false), cache: 'no-store' }),
         fetch(apiPath('/organisms'), { cache: 'no-store' }),
         fetch(apiPath('/strains'), { cache: 'no-store' }),
+        fetch(apiPath('/tools'), { cache: 'no-store' }),
       ]);
       if (!adminRes.ok) throw new Error('Your admin session is not valid. Please sign in again.');
       if (!orgRes.ok || !strainRes.ok) throw new Error('Failed to load organism and strain records.');
@@ -228,6 +237,10 @@ export default function AdminPortal() {
       const strainData = await strainRes.json() as StrainRecord[];
       setOrganisms(orgData);
       setStrains(strainData);
+      if (toolsRes.ok) {
+        const toolData = await toolsRes.json() as { tools?: ToolCatalogItem[] };
+        setAvailableMayaTools(toolData.tools || []);
+      }
 
       const firstOrgId = orgData[0]?.id?.toString() || '';
       const firstStrainId = strainData[0]?.id?.toString() || '';
@@ -545,7 +558,7 @@ export default function AdminPortal() {
                   <div className="grid gap-5 md:grid-cols-2">
                     <SelectInput label="Target organism" value={mayaForm.organismId} onChange={(value) => setMayaForm((current) => ({ ...current, organismId: value, strainId: '' }))} options={organisms.map((item) => ({ value: item.id.toString(), label: item.scientificName }))} />
                     <SelectInput label="Target genome / strain" value={mayaForm.strainId} onChange={(value) => setMayaForm((current) => ({ ...current, strainId: value }))} options={[{ value: '', label: 'Organism-level result' }, ...strains.filter((item) => !mayaForm.organismId || item.organismId.toString() === mayaForm.organismId).map((item) => ({ value: item.id.toString(), label: item.strainName }))]} />
-                    <SelectInput label="MAYA tool" value={mayaForm.toolName} onChange={(value) => setMayaForm((current) => ({ ...current, toolName: value }))} options={MAYA_TOOLS.map((tool) => ({ value: tool, label: tool === 'custom' ? 'Custom tool...' : tool }))} />
+                    <SelectInput label="MAYA tool" value={mayaForm.toolName} onChange={(value) => setMayaForm((current) => ({ ...current, toolName: value }))} options={[...(availableMayaTools.length ? availableMayaTools.map((tool) => ({ value: tool.key, label: `${tool.label} (${tool.category})` })) : MAYA_TOOLS.filter((tool) => tool !== 'custom').map((tool) => ({ value: tool, label: tool }))), { value: 'custom', label: 'Custom tool...' }]} />
                     {mayaForm.toolName === 'custom' && <TextInput label="Custom tool name" value={customMayaToolName} onChange={setCustomMayaToolName} />}
                     <SelectInput label="Run status" value={mayaForm.runStatus} onChange={(value) => setMayaForm((current) => ({ ...current, runStatus: value }))} options={['completed', 'warning', 'partial', 'failed', 'pending', 'not_available'].map((item) => ({ value: item, label: item }))} />
                     <TextInput label="Tool version" value={mayaForm.version} onChange={(value) => setMayaForm((current) => ({ ...current, version: value }))} />

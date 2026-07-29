@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
 import {
+  AboutTeamSection,
   ApprovalStatus,
   ContactMessageStatus,
   EvidenceBasis,
@@ -25,7 +26,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { createHash, randomUUID } from 'crypto';
 import { getOrganismById } from './services/organismService';
 import { getOrganismResults, getOrganismToolResult, getToolOutputFile, saveNormalizedToolRun } from './services/resultService';
-import { normalizeToolName, TOOL_KEYS } from './services/resultsParsers/toolDefinitions';
+import { normalizeToolName, TOOL_DEFINITIONS, TOOL_KEYS } from './services/resultsParsers/toolDefinitions';
 import {
   configuredStorageDriver,
   deleteStoredFiles,
@@ -538,6 +539,89 @@ function buildContactMessagePayload(body: Record<string, unknown>) {
       message,
     },
   };
+}
+
+function isAllowedAboutPortrait(value: string) {
+  return /^\/[A-Za-z0-9._/-]{1,300}$/.test(value) && !value.includes('..');
+}
+
+function buildAboutTeamMemberPayload(body: Record<string, unknown>, requireIdentity: boolean) {
+  const has = (field: string) => Object.prototype.hasOwnProperty.call(body, field);
+  const data: Record<string, unknown> = {};
+  const rawSection = typeof body.section === 'string' ? body.section.toUpperCase() : '';
+
+  if (requireIdentity || has('section')) {
+    if (!Object.values(AboutTeamSection).includes(rawSection as AboutTeamSection)) {
+      return { error: 'A valid team section is required' as const };
+    }
+    data.section = rawSection as AboutTeamSection;
+  }
+
+  if (requireIdentity || has('name')) {
+    const name = sanitizeContactText(body.name, 160);
+    if (!name) return { error: 'Member name is required' as const };
+    data.name = name;
+  }
+
+  const textFields: Array<[string, number, boolean?]> = [
+    ['title', 320],
+    ['affiliation', 320],
+    ['contribution', 3000, true],
+    ['course', 220],
+  ];
+  for (const [field, maxLength, preserveNewlines] of textFields) {
+    if (!has(field)) continue;
+    data[field] = body[field] === null ? null : sanitizeContactText(body[field], maxLength, preserveNewlines);
+  }
+
+  if (has('email')) {
+    const email = body.email === null ? null : normalizedEmail(body.email);
+    if (email && !EMAIL_PATTERN.test(email)) return { error: 'Please provide a valid member email address' as const };
+    data.email = email || null;
+  }
+
+  if (has('portraitSrc')) {
+    if (body.portraitSrc === null || body.portraitSrc === '') {
+      data.portraitSrc = null;
+    } else {
+      const portraitSrc = sanitizeContactText(body.portraitSrc, 300);
+      if (!portraitSrc || !isAllowedAboutPortrait(portraitSrc)) {
+        return { error: 'Portrait path must be a safe relative public path beginning with /' as const };
+      }
+      data.portraitSrc = portraitSrc;
+    }
+  }
+
+  if (has('displayOrder')) {
+    const displayOrder = Number(body.displayOrder);
+    if (!Number.isInteger(displayOrder) || displayOrder < 0 || displayOrder > 10_000) {
+      return { error: 'Display order must be a whole number between 0 and 10000' as const };
+    }
+    data.displayOrder = displayOrder;
+  }
+
+  return { data };
+}
+
+function buildToolCatalogPayload(body: Record<string, unknown>, requireIdentity: boolean) {
+  const has = (field: string) => Object.prototype.hasOwnProperty.call(body, field);
+  const data: Record<string, unknown> = {};
+  if (requireIdentity || has('key')) {
+    const key = normalizeToolName(textValue(body.key, 80) || '');
+    if (!/^[a-z][a-z0-9_]{1,79}$/.test(key)) return { error: 'Tool key must use lowercase letters, numbers, and underscores' as const };
+    data.key = key;
+  }
+  for (const [field, limit] of [['label', 120], ['category', 80], ['description', 500]] as const) {
+    if (!requireIdentity && !has(field)) continue;
+    const value = sanitizeContactText(body[field], limit, field === 'description');
+    if (requireIdentity && !value) return { error: `Tool ${field} is required` as const };
+    if (value) data[field] = value;
+  }
+  if (has('active')) {
+    if (typeof body.active !== 'boolean') return { error: 'Tool active status must be true or false' as const };
+    data.active = body.active;
+  }
+  return { data };
 }
 
 function normalizedEmail(value: unknown) {
@@ -2173,6 +2257,35 @@ app.post('/api/contact-messages', contactRateLimiter, async (req: Request, res: 
   }
 });
 
+app.get('/api/about/team', async (_req: Request, res: Response) => {
+  try {
+    const members = await prisma.aboutTeamMember.findMany({
+      where: { active: true },
+      orderBy: [{ section: 'asc' }, { displayOrder: 'asc' }, { name: 'asc' }],
+    });
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({ members });
+  } catch (error) {
+    console.error('About Team Fetch Error:', error);
+    res.status(500).json({ error: 'Failed to fetch About Us team members' });
+  }
+});
+
+app.get('/api/tools', async (_req: Request, res: Response) => {
+  try {
+    const configuredTools = await prisma.toolCatalogEntry.findMany({ where: { active: true }, orderBy: { label: 'asc' } });
+    const tools = new Map(TOOL_DEFINITIONS.map((tool) => [tool.key, tool]));
+    configuredTools.forEach((tool) => tools.set(tool.key, {
+      key: tool.key, label: tool.label, category: tool.category, description: tool.description,
+    }));
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({ tools: Array.from(tools.values()) });
+  } catch (error) {
+    console.error('Tool Catalog Fetch Error:', error);
+    res.status(500).json({ error: 'Failed to fetch tool catalog' });
+  }
+});
+
 // ─── USER SUBMISSIONS & BLOGS ───────────────────────────────────────────────
 
 app.get('/api/me/uploads', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
@@ -3533,15 +3646,134 @@ app.post('/api/admin/contact-messages/:id/archive', requireAdmin, async (req: Au
 app.delete('/api/admin/contact-messages/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const messageId = parseStringParam(req.params.id);
-    await prisma.contactMessage.update({
+    const message = await prisma.contactMessage.update({
       where: { id: messageId },
       data: { archived: true },
     });
-    await writeAdminLog(req.user?.userId, "CONTACT_MESSAGE_ARCHIVED", "ContactMessage", messageId);
-    res.json({ message: "Contact message archived" });
+    await writeAdminLog(req.user?.userId, "CONTACT_MESSAGE_DELETED", "ContactMessage", messageId, {
+      result: 'success',
+      targetEmail: message.email,
+      targetSubject: message.subject,
+      deletionMode: 'soft',
+    });
+    res.json({ message: "Contact message deleted" });
   } catch (error) {
     console.error("Admin Contact Message Delete Error:", error);
-    res.status(500).json({ error: "Failed to archive contact message" });
+    res.status(500).json({ error: "Failed to delete contact message" });
+  }
+});
+
+app.get('/api/admin/tools', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tools = await prisma.toolCatalogEntry.findMany({ orderBy: [{ active: 'desc' }, { category: 'asc' }, { label: 'asc' }] });
+    res.json({ tools });
+  } catch (error) {
+    console.error('Admin Tool Catalog Fetch Error:', error);
+    res.status(500).json({ error: 'Failed to fetch tool catalog' });
+  }
+});
+
+app.post('/api/admin/tools', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const payload = buildToolCatalogPayload(req.body || {}, true);
+    if ('error' in payload) return res.status(400).json({ error: payload.error });
+    const tool = await prisma.toolCatalogEntry.create({ data: payload.data as Prisma.ToolCatalogEntryUncheckedCreateInput });
+    await writeAdminLog(req.user?.userId, 'TOOL_CATALOG_ENTRY_CREATED', 'ToolCatalogEntry', tool.id, { result: 'success', key: tool.key, label: tool.label });
+    res.status(201).json(tool);
+  } catch (error) {
+    console.error('Admin Tool Catalog Create Error:', error);
+    res.status(500).json({ error: 'Failed to add tool' });
+  }
+});
+
+app.patch('/api/admin/tools/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const payload = buildToolCatalogPayload(req.body || {}, false);
+    if ('error' in payload) return res.status(400).json({ error: payload.error });
+    if (!Object.keys(payload.data).length) return res.status(400).json({ error: 'Provide at least one tool field to update' });
+    const tool = await prisma.toolCatalogEntry.update({ where: { id: parseStringParam(req.params.id) }, data: payload.data as Prisma.ToolCatalogEntryUncheckedUpdateInput });
+    await writeAdminLog(req.user?.userId, 'TOOL_CATALOG_ENTRY_UPDATED', 'ToolCatalogEntry', tool.id, { result: 'success', key: tool.key, active: tool.active });
+    res.json(tool);
+  } catch (error) {
+    console.error('Admin Tool Catalog Update Error:', error);
+    res.status(500).json({ error: 'Failed to update tool' });
+  }
+});
+
+app.delete('/api/admin/tools/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tool = await prisma.toolCatalogEntry.update({ where: { id: parseStringParam(req.params.id) }, data: { active: false } });
+    await writeAdminLog(req.user?.userId, 'TOOL_CATALOG_ENTRY_RETIRED', 'ToolCatalogEntry', tool.id, { result: 'success', key: tool.key, deletionMode: 'soft' });
+    res.json({ message: 'Tool retired from future ingestion choices' });
+  } catch (error) {
+    console.error('Admin Tool Catalog Delete Error:', error);
+    res.status(500).json({ error: 'Failed to retire tool' });
+  }
+});
+
+app.get('/api/admin/about/team', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const members = await prisma.aboutTeamMember.findMany({
+      orderBy: [{ active: 'desc' }, { section: 'asc' }, { displayOrder: 'asc' }, { name: 'asc' }],
+    });
+    res.json({ members });
+  } catch (error) {
+    console.error('Admin About Team Fetch Error:', error);
+    res.status(500).json({ error: 'Failed to fetch team members' });
+  }
+});
+
+app.post('/api/admin/about/team', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const payload = buildAboutTeamMemberPayload(req.body || {}, true);
+    if ('error' in payload) return res.status(400).json({ error: payload.error });
+    const member = await prisma.aboutTeamMember.create({
+      data: payload.data as Prisma.AboutTeamMemberUncheckedCreateInput,
+    });
+    await writeAdminLog(req.user?.userId, 'ABOUT_TEAM_MEMBER_CREATED', 'AboutTeamMember', member.id, {
+      result: 'success', section: member.section, name: member.name,
+    });
+    res.status(201).json(member);
+  } catch (error) {
+    console.error('Admin About Team Create Error:', error);
+    res.status(500).json({ error: 'Failed to add team member' });
+  }
+});
+
+app.patch('/api/admin/about/team/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const memberId = parseStringParam(req.params.id);
+    const payload = buildAboutTeamMemberPayload(req.body || {}, false);
+    if ('error' in payload) return res.status(400).json({ error: payload.error });
+    if (!Object.keys(payload.data).length) return res.status(400).json({ error: 'Provide at least one field to update' });
+    const member = await prisma.aboutTeamMember.update({
+      where: { id: memberId },
+      data: payload.data as Prisma.AboutTeamMemberUncheckedUpdateInput,
+    });
+    await writeAdminLog(req.user?.userId, 'ABOUT_TEAM_MEMBER_UPDATED', 'AboutTeamMember', member.id, {
+      result: 'success', section: member.section, name: member.name,
+    });
+    res.json(member);
+  } catch (error) {
+    console.error('Admin About Team Update Error:', error);
+    res.status(500).json({ error: 'Failed to update team member' });
+  }
+});
+
+app.delete('/api/admin/about/team/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const memberId = parseStringParam(req.params.id);
+    const member = await prisma.aboutTeamMember.update({
+      where: { id: memberId },
+      data: { active: false },
+    });
+    await writeAdminLog(req.user?.userId, 'ABOUT_TEAM_MEMBER_REMOVED', 'AboutTeamMember', member.id, {
+      result: 'success', section: member.section, name: member.name, deletionMode: 'soft',
+    });
+    res.json({ message: 'Team member removed from the public About Us page' });
+  } catch (error) {
+    console.error('Admin About Team Delete Error:', error);
+    res.status(500).json({ error: 'Failed to remove team member' });
   }
 });
 

@@ -751,6 +751,13 @@ function OperationalMetricsStrip({ strains, allStrains, alerts, allAlerts }: {
 }) {
   const newThisMonth = countRecentRecords(strains, 30);
   const highRisk = alerts.filter(isHighRiskAlert).length;
+  const amrPositiveGenomes = new Set(alerts.map((alert) => alert.strainId)).size;
+  const drugClassCounts = alerts.reduce<Record<string, number>>((counts, alert) => {
+    const drugClass = alert.drugClass?.trim() || 'Not reported';
+    counts[drugClass] = (counts[drugClass] || 0) + 1;
+    return counts;
+  }, {});
+  const topDrugClass = Object.entries(drugClassCounts).sort(([, left], [, right]) => right - left)[0];
   const domainCounts = strains.reduce<Record<string, number>>((acc, strain) => {
     const domain = strain.organism?.domain || 'Unknown';
     acc[domain] = (acc[domain] || 0) + 1;
@@ -763,7 +770,7 @@ function OperationalMetricsStrip({ strains, allStrains, alerts, allAlerts }: {
 
   return (
     <section className="overflow-hidden border border-slate-200 bg-white shadow-sm">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-7">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         <KpiCell
           icon={Database}
           label="Genome Records"
@@ -799,6 +806,20 @@ function OperationalMetricsStrip({ strains, allStrains, alerts, allAlerts }: {
           detail={`${formatIndianNumber(allAlerts.length)} total alerts`}
           tone="red"
           emphasis
+        />
+        <KpiCell
+          icon={ShieldAlert}
+          label="AMR-positive Genomes"
+          value={formatIndianNumber(amrPositiveGenomes)}
+          detail="Strains with detected AMR genes"
+          tone="orange"
+        />
+        <KpiCell
+          icon={TestTube2}
+          label="Top AMR Drug Class"
+          value={topDrugClass ? topDrugClass[0] : 'N/A'}
+          detail={topDrugClass ? `${formatIndianNumber(topDrugClass[1])} normalized detections` : 'No normalized AMR detections'}
+          tone="red"
         />
         <KpiCell
           icon={AlertTriangle}
@@ -849,8 +870,8 @@ function KpiCell({ icon: Icon, label, value, detail, tone, emphasis = false, rin
       </div>
       <div className="min-w-0">
         <p className={`text-[10px] font-black uppercase leading-snug tracking-widest ${emphasis ? 'text-red-500' : 'text-slate-500'}`}>{label}</p>
-        <p className={`mt-1 text-2xl font-black tracking-tight ${emphasis ? 'text-red-600' : 'text-[#0B1B3A]'}`}>{value}</p>
-        <p className="mt-1 text-[11px] font-bold leading-snug text-slate-500">{detail}</p>
+        <p className={`mt-1 break-words text-2xl font-black tracking-tight ${emphasis ? 'text-red-600' : 'text-[#0B1B3A]'}`}>{value}</p>
+        <p className="mt-1 break-words text-[11px] font-bold leading-snug text-slate-500">{detail}</p>
       </div>
     </div>
   );

@@ -50,6 +50,8 @@ export type SurveillanceOverview = {
     organismsTracked: number;
     countriesRepresented: number;
     genotypicAmrDetections: number;
+    amrPositiveStrains: number;
+    completedAmrFinderPlusRuns: number;
     completedMayaRuns: number;
   };
   quality: {

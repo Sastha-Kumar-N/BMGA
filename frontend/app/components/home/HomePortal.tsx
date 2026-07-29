@@ -114,6 +114,10 @@ export default function HomePortal() {
   const { data, loading, refreshing, error } = useHomePortalData();
   const [registryQuery, setRegistryQuery] = useState('');
   const [selectedIndiaStrainId, setSelectedIndiaStrainId] = useState<number | null>(null);
+  const organismResultsHref = (organismId: number) => {
+    const destination = `/organisms/${organismId}/results`;
+    return session ? destination : `/login?callbackUrl=${encodeURIComponent(destination)}`;
+  };
 
   const overview = data.overview;
   const indiaStrains = useMemo(() => filterIndianStrains(data.strains), [data.strains]);
@@ -207,7 +211,7 @@ export default function HomePortal() {
       <HomeNavigation genomeHref={baseGenomeHref} />
       <main id="main-content" className="min-h-screen bg-white text-[#0B1B3A] selection:bg-orange-500/20">
         <section id="home" aria-labelledby="home-title" className="isolate relative min-h-[calc(100svh-8rem)] overflow-hidden bg-[#06152e] text-white lg:min-h-[660px]">
-          <HomeGlobalMap locations={overview?.locations || []} />
+          <HomeGlobalMap locations={overview?.locations || []} resultHrefForOrganism={organismResultsHref} />
           <div className="pointer-events-none absolute inset-0 z-10 bg-[linear-gradient(90deg,rgba(4,17,38,0.97)_0%,rgba(4,17,38,0.88)_28%,rgba(4,17,38,0.42)_58%,rgba(4,17,38,0.12)_100%)]" />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-40 bg-gradient-to-t from-[#06152e] to-transparent" />
 
@@ -365,6 +369,7 @@ export default function HomePortal() {
                 error={!data.strains.length ? error : null}
                 selectedStrainId={selectedIndiaStrainId}
                 onSelectStrain={setSelectedIndiaStrainId}
+                resultHrefForOrganism={organismResultsHref}
               />
               <div className="border-y border-slate-200 bg-white px-5">
                 <div className="flex items-center justify-between border-b border-slate-200 py-5">
@@ -375,7 +380,7 @@ export default function HomePortal() {
                   {latestIndiaRecords.length ? latestIndiaRecords.map((strain) => (
                     <Link
                       key={strain.id}
-                      href={`/organisms/${strain.organismId}/results`}
+                      href={organismResultsHref(strain.organismId)}
                       onFocus={() => setSelectedIndiaStrainId(strain.id)}
                       onMouseEnter={() => setSelectedIndiaStrainId(strain.id)}
                       aria-current={selectedIndiaStrainId === strain.id ? 'true' : undefined}

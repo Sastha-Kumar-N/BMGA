@@ -144,10 +144,12 @@ function MetricStrip({ overview, loading }: { overview: ReturnType<typeof useSur
     { label: 'Approved strains', value: overview?.metrics.approvedStrains, detail: `${formatCount(overview?.metrics.organismsTracked)} ${overview?.metrics.organismsTracked === 1 ? 'organism' : 'organisms'}`, icon: Dna, tone: 'text-orange-600 bg-orange-50' },
     { label: 'Countries represented', value: overview?.metrics.countriesRepresented, detail: 'Reported country metadata', icon: Globe2, tone: 'text-teal-700 bg-teal-50' },
     { label: 'Genotypic AMR detections', value: overview?.metrics.genotypicAmrDetections, detail: 'Normalized gene-level rows', icon: ShieldAlert, tone: 'text-red-700 bg-red-50' },
+    { label: 'AMR-positive genomes', value: overview?.metrics.amrPositiveStrains, detail: 'Strains with one or more detections', icon: ShieldAlert, tone: 'text-orange-700 bg-orange-50' },
+    { label: 'AMR Finder Plus runs', value: overview?.metrics.completedAmrFinderPlusRuns, detail: 'Completed approved runs', icon: Activity, tone: 'text-violet-700 bg-violet-50' },
     { label: 'Completed MAYA runs', value: overview?.metrics.completedMayaRuns, detail: 'Approved strain-linked runs', icon: Activity, tone: 'text-blue-700 bg-blue-50' },
   ];
   return (
-    <section aria-label="Global surveillance metrics" className="grid border border-slate-200 bg-white sm:grid-cols-2 xl:grid-cols-4 xl:divide-x xl:divide-slate-200">
+    <section aria-label="Global surveillance metrics" className="grid border border-slate-200 bg-white sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 2xl:divide-x 2xl:divide-slate-200">
       {metrics.map((metric) => (
         <div key={metric.label} className="flex min-h-28 items-center gap-4 border-b border-slate-200 p-4 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0">
           <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-md ${metric.tone}`}><metric.icon size={21} /></span>
