@@ -26,6 +26,7 @@ const sectionLinks = [
   { label: 'Overview', href: '/surveillance', icon: Globe2 },
   { label: 'Global Map', href: '/surveillance#global-map', icon: Globe2 },
   { label: 'AMR Insights', href: '/surveillance/amr', icon: ShieldAlert },
+  { label: 'India AMR Findings', href: '/amr-findings-india', icon: ShieldAlert },
   { label: 'Strain Explorer', href: '/surveillance/records', icon: Database },
   { label: 'Data Quality', href: '/surveillance#data-quality', icon: BarChart3 },
   { label: 'Submit Data', href: '/surveillance/submit', icon: UploadCloud },

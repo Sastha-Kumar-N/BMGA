@@ -21,6 +21,7 @@ export default function HomeFooter({ genomeHref, resultsHref, signedIn }: { geno
       links: [
         { label: 'Surveillance Records', href: '/surveillance/records' },
         { label: 'AMR Insights', href: '/surveillance/amr' },
+        { label: 'AMR Findings of India', href: '/amr-findings-india' },
         { label: 'Methods & Limitations', href: '/surveillance/methodology' },
         { label: 'FAIR Data Gateway', href: '/fair' },
         { label: 'Submit Organism Data', href: signedIn ? '/submit-organism' : '/login' },

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
 import {
   AboutTeamSection,
+  AmrFindingStatus,
   ApprovalStatus,
   ContactMessageStatus,
   EvidenceBasis,
@@ -49,6 +50,17 @@ import {
   syncAmrGenesFromToolRows,
   type SurveillanceFilters,
 } from './services/surveillanceService';
+import {
+  amrFindingInclude,
+  amrDashboard,
+  amrFilterOptions,
+  createAmrFinding,
+  listPublishedAmrFindings,
+  publishedAmrFindingBySlug,
+  setAmrFindingStatus,
+  updateAmrFinding,
+  type AmrFindingFilters,
+} from './services/amrFindingsService';
 // --- Runtime Configuration --------------------------------------------------
 const isProduction = process.env.NODE_ENV === 'production';
 const allowInsecureDevSecrets = process.env.ALLOW_INSECURE_DEV_SECRETS === 'true';
@@ -449,6 +461,7 @@ function requireRole(roles: UserRole[]) {
 }
 
 const requireAdmin = requireRole([UserRole.ADMIN]);
+const requireAmrAuthor = requireRole([UserRole.ADMIN, UserRole.MODERATOR, UserRole.CONTRIBUTOR]);
 
 function parseJsonObject(value: unknown, fallback: Record<string, unknown> = {}) {
   if (!value) return fallback;
@@ -3070,6 +3083,175 @@ app.get('/api/surveillance/amr', async (req: Request, res: Response) => {
     });
     res.status(500).json({ error: 'Failed to load AMR surveillance insights' });
   }
+});
+
+// ─── AMR FINDINGS OF INDIA ─────────────────────────────────────────────────
+
+function parseAmrFindingFilters(query: Request['query']): AmrFindingFilters {
+  const read = (key: string) => textValue(Array.isArray(query[key]) ? query[key][0] : query[key], 240);
+  const number = (key: string) => parseOptionalInt(Array.isArray(query[key]) ? query[key][0] : query[key]);
+  const boolean = (key: string) => {
+    const value = read(key);
+    return value === 'true' ? true : value === 'false' ? false : undefined;
+  };
+  const sort = read('sort');
+  return {
+    q: read('q'), state: read('state'), domain: read('domain'), pathogen: read('pathogen'), gene: read('gene'),
+    antimicrobialClass: read('antimicrobialClass'), mechanism: read('mechanism'), year: number('year'),
+    evidenceLevel: read('evidenceLevel') as AmrFindingFilters['evidenceLevel'], importance: read('importance') as AmrFindingFilters['importance'],
+    resistanceEvidence: read('resistanceEvidence') as AmrFindingFilters['resistanceEvidence'], oneHealth: boolean('oneHealth'),
+    hasGenomicData: boolean('hasGenomicData'), openAccess: boolean('openAccess'), page: number('page'), pageSize: number('pageSize'),
+    sort: sort === 'oldest' || sort === 'importance' || sort === 'relevance' ? sort : 'newest',
+  };
+}
+
+app.use('/api/amr-findings', surveillanceRateLimiter);
+
+app.get('/api/amr-findings/dashboard', async (_req: Request, res: Response) => {
+  try {
+    const dashboard = await amrDashboard(prisma);
+    res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=90');
+    res.json(dashboard);
+  } catch (error) {
+    logEvent('error', 'amr_findings_dashboard_failed', { requestId: currentContext()?.requestId, error: safeErrorMessage(error, 'AMR findings dashboard failed') });
+    res.status(500).json({ error: 'Failed to load AMR findings dashboard' });
+  }
+});
+
+app.get('/api/amr-findings/filters', async (_req: Request, res: Response) => {
+  try {
+    const filters = await amrFilterOptions(prisma);
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json(filters);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load AMR finding filters' });
+  }
+});
+
+app.get('/api/amr-findings', async (req: Request, res: Response) => {
+  try {
+    const findings = await listPublishedAmrFindings(prisma, parseAmrFindingFilters(req.query));
+    res.setHeader('Cache-Control', 'public, max-age=20, stale-while-revalidate=60');
+    res.json(findings);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load AMR findings' });
+  }
+});
+
+app.get('/api/amr-findings/:slug', async (req: Request, res: Response) => {
+  try {
+    const finding = await publishedAmrFindingBySlug(prisma, parseStringParam(req.params.slug));
+    if (!finding) return res.status(404).json({ error: 'AMR finding not found' });
+    res.json(finding);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load AMR finding' });
+  }
+});
+
+app.get('/api/admin/amr-findings', requireAmrAuthor, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = Math.max(1, parseOptionalInt(String(req.query.page || '')) || 1);
+    const pageSize = Math.min(100, Math.max(10, parseOptionalInt(String(req.query.pageSize || '')) || 25));
+    const status = String(req.query.status || '');
+    const where: Prisma.AmrFindingWhereInput = req.user?.role === UserRole.CONTRIBUTOR
+      ? { createdById: req.user.userId }
+      : status && Object.values(AmrFindingStatus).includes(status as AmrFindingStatus) ? { curationStatus: status as AmrFindingStatus } : {};
+    const [total, items] = await Promise.all([
+      prisma.amrFinding.count({ where }),
+      prisma.amrFinding.findMany({ where, include: { createdBy: { select: { name: true, email: true } }, reviewedBy: { select: { name: true, email: true } }, domains: { include: { term: true } }, pathogens: { include: { pathogen: true } }, locations: true }, orderBy: { updatedAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+    ]);
+    res.json({ items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load AMR curation records' });
+  }
+});
+
+app.post('/api/admin/amr-findings', requireAmrAuthor, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const finding = await createAmrFinding(prisma, req.body || {}, req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_FINDING_CREATED', 'AmrFinding', finding.id, { result: 'success', title: finding.title, status: finding.curationStatus });
+    res.status(201).json(finding);
+  } catch (error) {
+    res.status(400).json({ error: safeErrorMessage(error, 'Unable to create AMR finding') });
+  }
+});
+
+app.get('/api/admin/amr-findings/:id', requireAmrAuthor, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const finding = await prisma.amrFinding.findUnique({ where: { id: parseStringParam(req.params.id) }, include: amrFindingInclude });
+    if (!finding) return res.status(404).json({ error: 'AMR finding not found' });
+    if (req.user?.role === UserRole.CONTRIBUTOR && finding.createdById !== req.user.userId) return res.status(403).json({ error: 'You can only view your own AMR drafts' });
+    res.json(finding);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load AMR finding' });
+  }
+});
+
+app.patch('/api/admin/amr-findings/:id', requireAmrAuthor, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const id = parseStringParam(req.params.id);
+    const existing = await prisma.amrFinding.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'AMR finding not found' });
+    if (req.user?.role === UserRole.CONTRIBUTOR && existing.createdById !== req.user.userId) return res.status(403).json({ error: 'You can only edit your own AMR drafts' });
+    if (req.user?.role === UserRole.CONTRIBUTOR && existing.curationStatus !== AmrFindingStatus.DRAFT) return res.status(409).json({ error: 'Submitted findings can only be edited by a curator or administrator' });
+    const finding = await updateAmrFinding(prisma, id, req.body || {}, req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_FINDING_UPDATED', 'AmrFinding', id, { result: 'success', title: finding.title });
+    res.json(finding);
+  } catch (error) {
+    res.status(400).json({ error: safeErrorMessage(error, 'Unable to update AMR finding') });
+  }
+});
+
+app.post('/api/admin/amr-findings/:id/status', requireAmrAuthor, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const status = parseStringParam(req.body?.status) as AmrFindingStatus;
+    if (!Object.values(AmrFindingStatus).includes(status)) return res.status(400).json({ error: 'Invalid AMR finding status' });
+    if (req.user?.role === UserRole.CONTRIBUTOR && status !== AmrFindingStatus.UNDER_REVIEW) return res.status(403).json({ error: 'Contributors can only submit drafts for review' });
+    if (req.user?.role === UserRole.MODERATOR && (status === AmrFindingStatus.APPROVED || status === AmrFindingStatus.PUBLISHED || status === AmrFindingStatus.ARCHIVED)) return res.status(403).json({ error: 'Only an administrator can approve, publish, or archive findings' });
+    const finding = await setAmrFindingStatus(prisma, parseStringParam(req.params.id), status, req.user!.userId, req.body?.note);
+    await writeAdminLog(req.user?.userId, 'AMR_FINDING_STATUS_CHANGED', 'AmrFinding', finding.id, { result: 'success', status, notePresent: Boolean(textValue(req.body?.note, 2_000)) });
+    res.json(finding);
+  } catch (error) {
+    res.status(400).json({ error: safeErrorMessage(error, 'Unable to update AMR finding status') });
+  }
+});
+
+app.get('/api/admin/amr-findings-template.csv', requireAmrAuthor, async (_req: AuthenticatedRequest, res: Response) => {
+  const header = 'title,keyFinding,scientificSummary,sourceReference,domains,pathogens,genes,antimicrobialClasses,publicationYear,state,evidenceLevel,publicHealthImportance,importanceReason\n';
+  const sample = 'SAMPLE DATA ONLY - do not publish,Fictional example for import validation,This is fictitious demonstration content and is not a scientific finding.,Sample source only,Environment,Example pathogen,example-gene,Beta-lactams,2026,Example State,LEVEL_2,MODERATE,\n';
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="amr-findings-india-template.csv"'); res.send(header + sample);
+});
+
+app.post('/api/admin/amr-findings/import', importRateLimiter, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const csvText = typeof req.body?.csvText === 'string' ? req.body.csvText : '';
+  const filename = textValue(req.body?.filename, 240) || 'amr-findings-import.csv';
+  if (!csvText || csvText.length > MAX_IMPORT_FILE_BYTES) return res.status(400).json({ error: 'Provide a CSV file under the configured import size limit.' });
+  const rows: Record<string, string>[] = [];
+  try {
+    await new Promise<void>((resolve, reject) => Readable.from(csvText).pipe(csv()).on('data', (row) => rows.push(row as Record<string, string>)).on('end', resolve).on('error', reject));
+  } catch {
+    return res.status(400).json({ error: 'Unable to parse the CSV file.' });
+  }
+  if (rows.length === 0) return res.status(400).json({ error: 'The CSV file does not contain any data rows.' });
+  if (rows.length > 500) return res.status(400).json({ error: 'Import at most 500 rows at a time.' });
+  const results: Array<{ row: number; status: 'imported' | 'error'; id?: string; error?: string }> = [];
+  for (const [index, row] of rows.entries()) {
+    try {
+      if (Object.values(row).some((value) => /^[=+\-@]/.test(String(value).trim()))) throw new Error('Formula-like CSV values are not allowed.');
+      const finding = await createAmrFinding(prisma, {
+        title: row.title, keyFinding: row.keyFinding, scientificSummary: row.scientificSummary, sourceReference: row.sourceReference,
+        domains: row.domains, pathogens: row.pathogens, genes: row.genes, antimicrobialClasses: row.antimicrobialClasses,
+        publicationYear: row.publicationYear, locations: row.state ? [{ state: row.state, country: 'India' }] : [],
+        evidenceLevel: row.evidenceLevel || 'LEVEL_1', publicHealthImportance: row.publicHealthImportance || 'MODERATE', importanceReason: row.importanceReason,
+      }, req.user!.userId);
+      results.push({ row: index + 2, status: 'imported', id: finding.id });
+    } catch (error) {
+      results.push({ row: index + 2, status: 'error', error: safeErrorMessage(error, 'Invalid row') });
+    }
+  }
+  const imported = results.filter((result) => result.status === 'imported').length;
+  await writeAdminLog(req.user?.userId, 'AMR_FINDINGS_BULK_IMPORTED', 'AmrFindingImport', undefined, { result: 'success', filename, rows: rows.length, imported, failed: rows.length - imported });
+  res.status(201).json({ filename, imported, failed: rows.length - imported, results });
 });
 
 // ─── GENOMICS & STRAIN ROUTES ────────────────────────────────────────────────

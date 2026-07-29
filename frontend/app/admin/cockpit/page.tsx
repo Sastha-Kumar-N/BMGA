@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertCircle, ArrowRight, BookOpenCheck, ClipboardCheck, Database, FileCheck2, Globe2, History, Inbox, MessageSquare, Plus, Search, ShieldCheck, Trash2, UserCog, UsersRound, Wrench } from 'lucide-react';
+import { AlertCircle, ArrowRight, BookOpenCheck, ClipboardCheck, Database, FileCheck2, Globe2, History, Inbox, MessageSquare, Plus, Search, ShieldAlert, ShieldCheck, Trash2, UserCog, UsersRound, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiPath } from '../../lib/api-client';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
@@ -235,6 +235,7 @@ export default function AdminCockpitPage() {
         { href: '/admin/uploads', title: 'Organism Review', body: 'Approve, reject, edit, or request changes.', icon: ClipboardCheck },
         { href: '/admin/blogs', title: 'Blog Review', body: `${pendingPosts} posts awaiting approval.`, icon: BookOpenCheck },
         { href: '/admin/tools', title: 'Tool Catalog', body: 'Enable or retire ingestion tool choices.', icon: Wrench },
+        { href: '/admin/amr-findings', title: 'AMR Findings of India', body: 'Curate, review, and publish scientific AMR findings.', icon: ShieldAlert },
       ],
     },
     {

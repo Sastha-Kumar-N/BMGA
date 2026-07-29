@@ -83,6 +83,54 @@ enum GenomeReferenceStatus {
   ARCHIVED
 }
 
+enum AmrFindingStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  PUBLISHED
+  REJECTED
+  ARCHIVED
+}
+
+enum AmrEvidenceLevel {
+  LEVEL_1
+  LEVEL_2
+  LEVEL_3
+  LEVEL_4
+  LEVEL_5
+}
+
+enum AmrPublicHealthImportance {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+enum AmrGeographicScope {
+  LOCAL
+  DISTRICT
+  STATE
+  MULTI_STATE
+  NATIONAL
+  INDIA_ASSOCIATED_INTERNATIONAL
+}
+
+enum AmrResistanceEvidence {
+  PHENOTYPIC
+  GENOTYPIC
+  EXPERIMENTAL
+  COMBINED
+  NOT_REPORTED
+}
+
+enum AmrClassificationOrigin {
+  REPORTED_BY_STUDY
+  CURATOR_INFERRED
+  DATABASE_CALCULATED
+  NOT_REPORTED
+}
+
 model User {
   id                      String                    @id @default(uuid())
   email                   String                    @unique
@@ -101,6 +149,9 @@ model User {
   blogPosts               BlogPost[]                @relation("UserBlogPosts")
   reviewedBlogPosts       BlogPost[]                @relation("ReviewedBlogPosts")
   adminLogs               AdminLog[]                @relation("AdminLogs")
+  amrFindingsCreated      AmrFinding[]              @relation("AmrFindingCreator")
+  amrFindingsReviewed     AmrFinding[]              @relation("AmrFindingReviewer")
+  amrFindingRevisions     AmrFindingRevision[]      @relation("AmrFindingRevisionActor")
 }
 
 model UserProfile {
@@ -465,6 +516,276 @@ model ToolCatalogEntry {
   updatedAt   DateTime @updatedAt
 
   @@index([active, category])
+}
+
+model AmrFinding {
+  id                       String                       @id @default(uuid())
+  slug                     String                       @unique
+  title                    String
+  keyFinding               String
+  scientificSummary        String
+  curatorInterpretation    String?
+  publicHealthSignificance String?
+  limitations              String?
+  futureDirections         String?
+  surveillanceAction       String?
+  sourceReference          String
+  domainSummary            String?
+  evidenceLevel            AmrEvidenceLevel
+  publicHealthImportance   AmrPublicHealthImportance   @default(MODERATE)
+  importanceReason         String?
+  geographicScope          AmrGeographicScope          @default(STATE)
+  resistanceEvidence       AmrResistanceEvidence       @default(NOT_REPORTED)
+  susceptibilityMethod     String?
+  interpretiveGuideline    String?
+  guidelineVersion         String?
+  mdrStatus                Boolean?
+  xdrStatus                Boolean?
+  pdrStatus                Boolean?
+  classificationOrigin     AmrClassificationOrigin    @default(NOT_REPORTED)
+  studyStartDate           DateTime?
+  studyEndDate             DateTime?
+  publicationYear          Int?
+  sampleSize               Int?
+  resistantSampleCount     Int?
+  prevalenceNumerator      Int?
+  prevalenceDenominator    Int?
+  prevalencePercentage     Decimal?                    @db.Decimal(5, 2)
+  studyDesign              String?
+  sequencingPlatform       String?
+  analysisMethod           String?
+  oneHealth                Boolean                     @default(false)
+  hasGenomicData           Boolean                     @default(false)
+  openAccess               Boolean                     @default(false)
+  curationStatus           AmrFindingStatus            @default(DRAFT)
+  createdById              String
+  reviewedById             String?
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+  lastReviewedAt           DateTime?
+  publishedAt              DateTime?
+
+  createdBy          User                    @relation("AmrFindingCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedBy         User?                   @relation("AmrFindingReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  domains            AmrFindingDomain[]
+  pathogens          AmrFindingPathogen[]
+  genes              AmrFindingGene[]
+  antimicrobials     AmrFindingAntimicrobial[]
+  mechanisms         AmrFindingMechanism[]
+  locations          AmrFindingLocation[]
+  publications       AmrFindingPublication[]
+  institutions       AmrFindingInstitution[]
+  accessions         AmrFindingAccession[]
+  keywords           AmrFindingKeyword[]
+  mobileElements     AmrFindingMobileElement[]
+  revisions          AmrFindingRevision[]
+
+  @@index([curationStatus, updatedAt])
+  @@index([publicationYear])
+  @@index([publicHealthImportance])
+  @@index([evidenceLevel])
+  @@index([createdById])
+}
+
+model AmrControlledVocabulary {
+  id        String   @id @default(uuid())
+  category  String
+  value     String
+  label     String
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  domains AmrFindingDomain[]
+
+  @@unique([category, value])
+  @@index([category, active, sortOrder])
+}
+
+model AmrPathogen {
+  id             String   @id @default(uuid())
+  scientificName String   @unique
+  organismType   String?
+  createdAt      DateTime @default(now())
+  findings       AmrFindingPathogen[]
+}
+
+model AmrResistanceGene {
+  id        String   @id @default(uuid())
+  symbol    String   @unique
+  variant   String?
+  createdAt DateTime @default(now())
+  findings  AmrFindingGene[]
+}
+
+model AmrAntimicrobialClass {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  drugs     AmrAntimicrobial[]
+}
+
+model AmrAntimicrobial {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  classId   String?
+  createdAt DateTime @default(now())
+  drugClass AmrAntimicrobialClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  findings  AmrFindingAntimicrobial[]
+  @@index([classId])
+}
+
+model AmrResistanceMechanism {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  findings  AmrFindingMechanism[]
+}
+
+model AmrFindingDomain {
+  findingId String
+  termId    String
+  finding   AmrFinding              @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  term      AmrControlledVocabulary @relation(fields: [termId], references: [id], onDelete: Restrict)
+  @@id([findingId, termId])
+  @@index([termId])
+}
+
+model AmrFindingPathogen {
+  findingId  String
+  pathogenId String
+  strain     String?
+  lineage    String?
+  sequenceType String?
+  serotype   String?
+  finding    AmrFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  pathogen   AmrPathogen @relation(fields: [pathogenId], references: [id], onDelete: Restrict)
+  @@id([findingId, pathogenId])
+  @@index([pathogenId])
+}
+
+model AmrFindingGene {
+  findingId String
+  geneId    String
+  finding   AmrFinding       @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  gene      AmrResistanceGene @relation(fields: [geneId], references: [id], onDelete: Restrict)
+  @@id([findingId, geneId])
+  @@index([geneId])
+}
+
+model AmrFindingAntimicrobial {
+  findingId       String
+  antimicrobialId String
+  phenotype       String?
+  finding         AmrFinding        @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  antimicrobial   AmrAntimicrobial  @relation(fields: [antimicrobialId], references: [id], onDelete: Restrict)
+  @@id([findingId, antimicrobialId])
+  @@index([antimicrobialId])
+}
+
+model AmrFindingMechanism {
+  findingId   String
+  mechanismId String
+  finding     AmrFinding             @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  mechanism   AmrResistanceMechanism @relation(fields: [mechanismId], references: [id], onDelete: Restrict)
+  @@id([findingId, mechanismId])
+  @@index([mechanismId])
+}
+
+model AmrFindingLocation {
+  id         String   @id @default(uuid())
+  findingId  String
+  country    String   @default("India")
+  state      String?
+  district   String?
+  city       String?
+  locality   String?
+  facility   String?
+  latitude   Float?
+  longitude  Float?
+  finding    AmrFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  @@index([findingId])
+  @@index([state])
+  @@index([district])
+}
+
+model AmrPublication {
+  id            String   @id @default(uuid())
+  title         String
+  authors       String?
+  journal       String?
+  publicationYear Int?
+  doi           String?  @unique
+  pubmedId      String?  @unique
+  externalUrl   String?
+  citationText  String?
+  openAccess    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  findings      AmrFindingPublication[]
+  @@index([publicationYear])
+}
+
+model AmrFindingPublication {
+  findingId     String
+  publicationId String
+  finding       AmrFinding    @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  publication   AmrPublication @relation(fields: [publicationId], references: [id], onDelete: Restrict)
+  @@id([findingId, publicationId])
+  @@index([publicationId])
+}
+
+model AmrFindingInstitution {
+  id        String   @id @default(uuid())
+  findingId String
+  name      String
+  role      String?
+  finding   AmrFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  @@index([findingId])
+}
+
+model AmrFindingAccession {
+  id        String   @id @default(uuid())
+  findingId String
+  database  String
+  accession String
+  url       String?
+  finding   AmrFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  @@unique([findingId, database, accession])
+  @@index([accession])
+}
+
+model AmrFindingKeyword {
+  id        String   @id @default(uuid())
+  findingId String
+  value     String
+  finding   AmrFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  @@unique([findingId, value])
+  @@index([value])
+}
+
+model AmrFindingMobileElement {
+  id        String   @id @default(uuid())
+  findingId String
+  type      String
+  name      String
+  finding   AmrFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  @@unique([findingId, type, name])
+  @@index([type, name])
+}
+
+model AmrFindingRevision {
+  id        String   @id @default(uuid())
+  findingId String
+  actorId   String?
+  action    String
+  note      String?
+  snapshot  Json?
+  createdAt DateTime @default(now())
+  finding   AmrFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  actor     User?      @relation("AmrFindingRevisionActor", fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([findingId, createdAt])
+  @@index([actorId])
 }
 
 model Assembly {

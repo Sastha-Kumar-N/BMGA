@@ -12,6 +12,7 @@ RUN npm ci
 
 FROM deps AS builder
 
+ARG BACKEND_SOURCE_REVISION=20260729-amr-findings-india
 COPY tsconfig.json ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./

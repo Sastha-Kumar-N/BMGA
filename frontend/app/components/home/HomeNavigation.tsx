@@ -23,6 +23,7 @@ export default function HomeNavigation({ genomeHref }: { genomeHref: string }) {
     { label: 'Home', href: '/#home', section: 'home' },
     { label: 'Global Surveillance', href: '/surveillance' },
     { label: 'India Dashboard', href: '/dashboard' },
+    { label: 'AMR Findings', href: '/amr-findings-india' },
     { label: 'Genome Tools', href: genomeHref },
     { label: 'Projects', href: '/#projects', section: 'projects' },
     { label: 'About', href: '/about' },
