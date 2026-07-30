@@ -8,6 +8,7 @@ import {
   ArrowUpRight,
   BookOpenText,
   CheckCircle2,
+  ClipboardCheck,
   Clock3,
   Database,
   FilePlus2,
@@ -128,6 +129,8 @@ export default function AccountPage() {
         <ActionCard href="/dashboard" icon={LayoutDashboard} title="Main Dashboard" body="Open the India atlas and public organism database." />
         <ActionCard href="/surveillance" icon={Globe2} title="Global Surveillance" body="Explore worldwide strain records, AMR insights, and data freshness." />
         <ActionCard href="/submit-organism" icon={FilePlus2} title="Submit Organism" body="Upload organism and genome metadata for admin approval." />
+        <ActionCard href="/submit-amr-finding" icon={ClipboardCheck} title="Submit AMR Evidence" body="Save a private AMR finding, JSON import, or publication for scientific review." />
+        <ActionCard href="/account/amr-submissions" icon={Clock3} title="My AMR Submissions" body="Track AMR drafts, review status, and administrator feedback." />
         <ActionCard href="/account/profile" icon={UserRound} title="Profile & Security" body="Maintain your professional profile, photo, identifiers, and password." />
         <ActionCard
           href={canCreateBlog ? '/blog/create' : '/blog'}

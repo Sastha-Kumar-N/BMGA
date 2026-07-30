@@ -235,7 +235,8 @@ export default function AdminCockpitPage() {
         { href: '/admin/uploads', title: 'Organism Review', body: 'Approve, reject, edit, or request changes.', icon: ClipboardCheck },
         { href: '/admin/blogs', title: 'Blog Review', body: `${pendingPosts} posts awaiting approval.`, icon: BookOpenCheck },
         { href: '/admin/tools', title: 'Tool Catalog', body: 'Enable or retire ingestion tool choices.', icon: Wrench },
-        { href: '/admin/amr-findings', title: 'AMR Findings of India', body: 'Curate, review, and publish scientific AMR findings.', icon: ShieldAlert },
+        { href: '/admin/amr-findings', title: 'AMR Curation Console', body: 'Create, edit, review, approve, and publish findings and publications.', icon: ShieldAlert },
+        { href: '/admin/amr-imports', title: 'AMR Source Imports', body: 'Preview controlled PubMed and Europe PMC literature imports.', icon: Search },
       ],
     },
     {

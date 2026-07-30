@@ -3,6 +3,9 @@ import express, { NextFunction, Request, Response } from 'express';
 import {
   AboutTeamSection,
   AmrFindingStatus,
+  AmrImportJobStatus,
+  AmrImportSource,
+  NotificationType,
   ApprovalStatus,
   ContactMessageStatus,
   EvidenceBasis,
@@ -61,6 +64,31 @@ import {
   updateAmrFinding,
   type AmrFindingFilters,
 } from './services/amrFindingsService';
+import {
+  addFindingModerationNote,
+  addPublicationModerationNote,
+  amrFindingJsonSchema,
+  createAdminPublication,
+  createImportedPublicationDrafts,
+  createNotification,
+  createUserFindingDraft,
+  createUserPublication,
+  getOwnAmrWorkspace,
+  importUserJsonFindings,
+  listPublishedPublications,
+  moderateFinding,
+  moderatePublication,
+  parseAmrJsonPayload,
+  publishedPublicationBySlug,
+  submitUserFinding,
+  submitUserPublication,
+  updateUserFindingDraft,
+  updateAdminPublication,
+  updateUserPublication,
+  type FindingModerationAction,
+  type PublicationModerationAction,
+} from './services/amrWorkflowService';
+import { importSourceIsSupported, previewExternalAmrImport } from './services/amrExternalImportService';
 // --- Runtime Configuration --------------------------------------------------
 const isProduction = process.env.NODE_ENV === 'production';
 const allowInsecureDevSecrets = process.env.ALLOW_INSECURE_DEV_SECRETS === 'true';
@@ -375,6 +403,12 @@ const accountSecurityRateLimiter = rateLimit({
   name: 'account-security',
   windowMs: defaultRateLimitWindowMs,
   max: numberEnv('ACCOUNT_SECURITY_RATE_LIMIT_MAX', 10),
+  key: (req) => `${getClientIp(req)}:${currentContext()?.userId || 'anonymous'}`,
+});
+const amrSubmissionRateLimiter = rateLimit({
+  name: 'amr-submission',
+  windowMs: defaultRateLimitWindowMs,
+  max: numberEnv('AMR_SUBMISSION_RATE_LIMIT_MAX', 40),
   key: (req) => `${getClientIp(req)}:${currentContext()?.userId || 'anonymous'}`,
 });
 
@@ -3148,6 +3182,448 @@ app.get('/api/amr-findings/:slug', async (req: Request, res: Response) => {
   }
 });
 
+function amrWorkflowErrorStatus(error: unknown) {
+  const message = safeErrorMessage(error, 'AMR workflow request failed');
+  if (/not found|does not exist/i.test(message)) return 404;
+  if (/only .*own|not authorized|cannot moderate/i.test(message)) return 403;
+  if (/already in review|already in review or closed|only drafts|only approved|future publication|duplicate target|requires review/i.test(message)) return 409;
+  return 400;
+}
+
+// Public AMR publications are independently curated. A publication becomes visible only after
+// the same approved-and-published workflow used by AMR findings.
+app.use('/api/amr-publications', surveillanceRateLimiter);
+
+app.get('/api/amr-publications', async (req: Request, res: Response) => {
+  try {
+    const page = parseOptionalInt(String(req.query.page || '')) || 1;
+    const pageSize = parseOptionalInt(String(req.query.pageSize || '')) || 20;
+    const year = parseOptionalInt(String(req.query.year || '')) || undefined;
+    const publications = await listPublishedPublications(prisma, { q: textValue(req.query.q, 240), year, page, pageSize });
+    res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=90');
+    res.json(publications);
+  } catch {
+    res.status(500).json({ error: 'Failed to load AMR publications' });
+  }
+});
+
+app.get('/api/amr-publications/:slug', async (req: Request, res: Response) => {
+  try {
+    const publication = await publishedPublicationBySlug(prisma, parseStringParam(req.params.slug));
+    if (!publication) return res.status(404).json({ error: 'AMR publication not found' });
+    res.json(publication);
+  } catch {
+    res.status(500).json({ error: 'Failed to load AMR publication' });
+  }
+});
+
+// Registered-user AMR workspace. These routes deliberately live outside /admin and apply
+// ownership checks in the service layer before any private draft or feedback is returned.
+app.get('/api/amr-submissions/schema', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(amrFindingJsonSchema);
+});
+
+app.get('/api/me/amr-submissions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const workspace = await getOwnAmrWorkspace(prisma, req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_WORKSPACE_OPENED', 'AmrWorkspace', req.user?.userId, { result: 'success' });
+    res.json(workspace);
+  } catch (error) {
+    res.status(500).json({ error: safeErrorMessage(error, 'Unable to load AMR submissions') });
+  }
+});
+
+app.get('/api/me/notifications', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const limit = Math.min(100, Math.max(1, parseOptionalInt(String(req.query.limit || '')) || 50));
+    const notifications = await prisma.notification.findMany({ where: { userId: req.user!.userId }, orderBy: { createdAt: 'desc' }, take: limit });
+    res.json(notifications);
+  } catch {
+    res.status(500).json({ error: 'Unable to load notifications' });
+  }
+});
+
+app.patch('/api/me/notifications/:id/read', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const notification = await prisma.notification.findFirst({ where: { id, userId: req.user!.userId } });
+    if (!notification) return res.status(404).json({ error: 'Notification not found' });
+    const updated = await prisma.notification.update({ where: { id }, data: { readAt: req.body?.read === false ? null : new Date() } });
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Unable to update notification' });
+  }
+});
+
+app.post('/api/amr-submissions/findings', requireAuth, amrSubmissionRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const finding = await createUserFindingDraft(prisma, parseJsonObject(req.body), req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_FINDING_USER_DRAFT_CREATED', 'AmrFinding', finding.id, { result: 'success', title: finding.title, source: 'USER_MANUAL' });
+    res.status(201).json(finding);
+  } catch (error) {
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to save AMR finding draft') });
+  }
+});
+
+app.post('/api/amr-submissions/findings/json/validate', requireAuth, amrSubmissionRateLimiter, (req: AuthenticatedRequest, res: Response) => {
+  const result = parseAmrJsonPayload(req.body?.jsonText);
+  if ('error' in result) return res.status(400).json(result);
+  res.json({ valid: true, records: result.records.length });
+});
+
+app.post('/api/amr-submissions/findings/json', requireAuth, amrSubmissionRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const filename = textValue(req.body?.filename, 240) || 'amr-findings.json';
+  const contentType = textValue(req.body?.contentType, 100);
+  if (contentType && !['application/json', 'text/json'].includes(contentType)) return res.status(415).json({ error: 'Only JSON files are accepted for AMR finding imports.' });
+  try {
+    const imported = await importUserJsonFindings(prisma, req.body?.jsonText, req.user!.userId, req.body?.submit === true, filename);
+    await writeAdminLog(req.user?.userId, 'AMR_FINDINGS_JSON_IMPORTED', 'AmrImportJob', imported.jobId, { result: 'success', filename, records: imported.records.length, submitted: req.body?.submit === true });
+    res.status(201).json({ jobId: imported.jobId, records: imported.records });
+  } catch (error) {
+    await writeAdminLog(req.user?.userId, 'AMR_FINDINGS_JSON_IMPORT_FAILED', 'AmrImportJob', undefined, { result: 'failure', filename });
+    const details = error && typeof error === 'object' && 'details' in error ? (error as { details?: unknown }).details : undefined;
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to import AMR finding JSON'), ...(details ? { details } : {}) });
+  }
+});
+
+app.patch('/api/amr-submissions/findings/:id', requireAuth, amrSubmissionRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const finding = await updateUserFindingDraft(prisma, id, parseJsonObject(req.body), req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_FINDING_USER_DRAFT_UPDATED', 'AmrFinding', id, { result: 'success' });
+    res.json(finding);
+  } catch (error) {
+    const status = amrWorkflowErrorStatus(error);
+    if (status === 403) await writeAdminLog(req.user?.userId, 'AMR_FINDING_USER_EDIT_DENIED', 'AmrFinding', id, { result: 'failure' });
+    res.status(status).json({ error: safeErrorMessage(error, 'Unable to update AMR finding draft') });
+  }
+});
+
+app.post('/api/amr-submissions/findings/:id/submit', requireAuth, amrSubmissionRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const finding = await submitUserFinding(prisma, id, req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_FINDING_USER_SUBMITTED', 'AmrFinding', id, { result: 'success', status: finding.curationStatus });
+    res.json(finding);
+  } catch (error) {
+    const status = amrWorkflowErrorStatus(error);
+    if (status === 403) await writeAdminLog(req.user?.userId, 'AMR_FINDING_USER_SUBMIT_DENIED', 'AmrFinding', id, { result: 'failure' });
+    res.status(status).json({ error: safeErrorMessage(error, 'Unable to submit AMR finding') });
+  }
+});
+
+app.post('/api/amr-submissions/publications', requireAuth, amrSubmissionRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await createUserPublication(prisma, parseJsonObject(req.body), req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_USER_DRAFT_CREATED', 'AmrPublication', result.publication.id, { result: 'success', title: result.publication.title, duplicateCandidates: result.duplicates.length });
+    res.status(201).json(result);
+  } catch (error) {
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to save AMR publication draft') });
+  }
+});
+
+app.patch('/api/amr-submissions/publications/:id', requireAuth, amrSubmissionRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const result = await updateUserPublication(prisma, id, parseJsonObject(req.body), req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_USER_DRAFT_UPDATED', 'AmrPublication', id, { result: 'success', duplicateCandidates: result.duplicates.length });
+    res.json(result);
+  } catch (error) {
+    const status = amrWorkflowErrorStatus(error);
+    if (status === 403) await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_USER_EDIT_DENIED', 'AmrPublication', id, { result: 'failure' });
+    res.status(status).json({ error: safeErrorMessage(error, 'Unable to update AMR publication draft') });
+  }
+});
+
+app.post('/api/amr-submissions/publications/:id/submit', requireAuth, amrSubmissionRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const publication = await submitUserPublication(prisma, id, req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_USER_SUBMITTED', 'AmrPublication', id, { result: 'success', status: publication.curationStatus });
+    res.json(publication);
+  } catch (error) {
+    const status = amrWorkflowErrorStatus(error);
+    if (status === 403) await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_USER_SUBMIT_DENIED', 'AmrPublication', id, { result: 'failure' });
+    res.status(status).json({ error: safeErrorMessage(error, 'Unable to submit AMR publication') });
+  }
+});
+
+const FINDING_MODERATION_ACTIONS: FindingModerationAction[] = ['ASSIGN_REVIEWER', 'START_REVIEW', 'REQUEST_CHANGES', 'APPROVE', 'PUBLISH', 'SCHEDULE', 'UNPUBLISH', 'REJECT', 'ARCHIVE', 'RESTORE', 'MARK_DUPLICATE', 'MERGE_DUPLICATE', 'LINK_STRAIN', 'LINK_PUBLICATION'];
+const PUBLICATION_MODERATION_ACTIONS: PublicationModerationAction[] = ['ASSIGN_REVIEWER', 'START_REVIEW', 'REQUEST_CHANGES', 'APPROVE', 'PUBLISH', 'SCHEDULE', 'UNPUBLISH', 'REJECT', 'ARCHIVE', 'RESTORE', 'MARK_DUPLICATE', 'MERGE_DUPLICATE'];
+
+app.get('/api/admin/amr-reviewers', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const reviewers = await prisma.user.findMany({ where: { role: { in: [UserRole.ADMIN, UserRole.MODERATOR] } }, select: { id: true, name: true, email: true, role: true }, orderBy: { name: 'asc' } });
+    res.json(reviewers);
+  } catch {
+    res.status(500).json({ error: 'Unable to load AMR reviewers' });
+  }
+});
+
+app.get('/api/admin/amr-bmga-strains', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const query = textValue(req.query.q, 240);
+    const strains = await prisma.strain.findMany({
+      where: query ? {
+        OR: [
+          { strainName: { contains: query, mode: 'insensitive' } },
+          { isolateName: { contains: query, mode: 'insensitive' } },
+          { organism: { scientificName: { contains: query, mode: 'insensitive' } } },
+        ],
+      } : {},
+      select: { id: true, strainName: true, isolateName: true, organism: { select: { scientificName: true } } },
+      orderBy: [{ organism: { scientificName: 'asc' } }, { strainName: 'asc' }],
+      take: 250,
+    });
+    await writeAdminLog(req.user?.userId, 'AMR_BMGA_STRAINS_LISTED', 'Strain', undefined, { result: 'success', count: strains.length });
+    res.json({ items: strains });
+  } catch {
+    res.status(500).json({ error: 'Unable to load BMGA strain records' });
+  }
+});
+
+app.get('/api/admin/amr-findings/:id/review', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const finding = await prisma.amrFinding.findUnique({ where: { id: parseStringParam(req.params.id) }, include: amrFindingInclude });
+    if (!finding) return res.status(404).json({ error: 'AMR finding not found' });
+    await writeAdminLog(req.user?.userId, 'AMR_FINDING_OPENED', 'AmrFinding', finding.id, { result: 'success' });
+    res.json(finding);
+  } catch {
+    res.status(500).json({ error: 'Unable to load AMR finding review details' });
+  }
+});
+
+app.get('/api/admin/amr-import-queries', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const queries = await prisma.amrImportQuery.findMany({ include: { createdBy: { select: { name: true, email: true } }, _count: { select: { jobs: true } } }, orderBy: { updatedAt: 'desc' } });
+    res.json(queries);
+  } catch {
+    res.status(500).json({ error: 'Unable to load AMR import queries' });
+  }
+});
+
+app.post('/api/admin/amr-import-queries', requireAdmin, adminRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const source = req.body?.source;
+  const name = textValue(req.body?.name, 200);
+  const query = textValue(req.body?.query, 500);
+  if (!importSourceIsSupported(source)) return res.status(400).json({ error: 'Choose PubMed or Europe PMC as the import source.' });
+  if (!name || !query || query.length < 3) return res.status(400).json({ error: 'Import query name and query text are required.' });
+  try {
+    const importQuery = await prisma.amrImportQuery.create({ data: { name, source, query, active: req.body?.active !== false, createdById: req.user!.userId } });
+    await writeAdminLog(req.user?.userId, 'AMR_IMPORT_QUERY_CREATED', 'AmrImportQuery', importQuery.id, { result: 'success', source });
+    res.status(201).json(importQuery);
+  } catch {
+    res.status(500).json({ error: 'Unable to save AMR import query' });
+  }
+});
+
+app.patch('/api/admin/amr-import-queries/:id', requireAdmin, adminRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  const name = textValue(req.body?.name, 200);
+  const query = textValue(req.body?.query, 500);
+  const source = req.body?.source;
+  if (source !== undefined && !importSourceIsSupported(source)) return res.status(400).json({ error: 'Choose PubMed or Europe PMC as the import source.' });
+  try {
+    const existing = await prisma.amrImportQuery.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'AMR import query not found' });
+    const updated = await prisma.amrImportQuery.update({ where: { id }, data: { ...(name ? { name } : {}), ...(query ? { query } : {}), ...(source ? { source } : {}), ...(typeof req.body?.active === 'boolean' ? { active: req.body.active } : {}) } });
+    await writeAdminLog(req.user?.userId, 'AMR_IMPORT_QUERY_UPDATED', 'AmrImportQuery', id, { result: 'success' });
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Unable to update AMR import query' });
+  }
+});
+
+app.get('/api/admin/amr-import-jobs', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = Math.max(1, parseOptionalInt(String(req.query.page || '')) || 1);
+    const pageSize = Math.min(100, Math.max(10, parseOptionalInt(String(req.query.pageSize || '')) || 25));
+    const [total, items] = await Promise.all([
+      prisma.amrImportJob.count(),
+      prisma.amrImportJob.findMany({ include: { query: { select: { name: true, source: true, query: true } }, createdBy: { select: { name: true, email: true } } }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+    ]);
+    res.json({ items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+  } catch {
+    res.status(500).json({ error: 'Unable to load AMR import history' });
+  }
+});
+
+async function previewAmrImportJob(actorId: string, source: Extract<AmrImportSource, 'PUBMED' | 'EUROPE_PMC'>, query: string, limit: unknown, queryId?: string) {
+  const job = await prisma.amrImportJob.create({ data: { source, request: { query, limit: Number(limit) || 20 }, queryId, status: AmrImportJobStatus.RUNNING, attempt: 1, createdById: actorId, startedAt: new Date() } });
+  try {
+    const preview = await previewExternalAmrImport(source, query, limit);
+    return prisma.amrImportJob.update({ where: { id: job.id }, data: { status: AmrImportJobStatus.PREVIEWED, preview: JSON.parse(JSON.stringify(preview.candidates)) as Prisma.InputJsonValue, result: { candidates: preview.candidates.length }, finishedAt: new Date() } });
+  } catch (error) {
+    await prisma.amrImportJob.update({ where: { id: job.id }, data: { status: AmrImportJobStatus.FAILED, errorMessage: safeErrorMessage(error, 'External AMR import preview failed'), finishedAt: new Date() } });
+    throw error;
+  }
+}
+
+app.post('/api/admin/amr-import-jobs/preview', requireAdmin, importRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  let source = req.body?.source;
+  let query = textValue(req.body?.query, 500);
+  let queryId = textValue(req.body?.queryId, 120);
+  try {
+    if (queryId) {
+      const savedQuery = await prisma.amrImportQuery.findUnique({ where: { id: queryId } });
+      if (!savedQuery) return res.status(404).json({ error: 'AMR import query not found' });
+      source = savedQuery.source; query = savedQuery.query;
+    }
+    if (!importSourceIsSupported(source) || !query) return res.status(400).json({ error: 'Choose an import source and provide a query.' });
+    const job = await previewAmrImportJob(req.user!.userId, source, query, req.body?.limit, queryId || undefined);
+    await writeAdminLog(req.user?.userId, 'AMR_IMPORT_PREVIEWED', 'AmrImportJob', job.id, { result: 'success', source, candidateCount: Array.isArray(job.preview) ? job.preview.length : 0 });
+    res.status(201).json(job);
+  } catch (error) {
+    await writeAdminLog(req.user?.userId, 'AMR_IMPORT_PREVIEW_FAILED', 'AmrImportJob', undefined, { result: 'failure', source: String(source || '') });
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to preview external AMR import') });
+  }
+});
+
+app.post('/api/admin/amr-import-jobs/:id/execute', requireAdmin, importRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const job = await prisma.amrImportJob.findUnique({ where: { id } });
+    if (!job) return res.status(404).json({ error: 'AMR import job not found' });
+    if (!importSourceIsSupported(job.source)) return res.status(400).json({ error: 'Only PubMed and Europe PMC preview jobs can be executed.' });
+    if (!Array.isArray(job.preview)) return res.status(409).json({ error: 'Preview this import before executing it.' });
+    const candidates = job.preview.flatMap((candidate) => candidate && typeof candidate === 'object' && !Array.isArray(candidate) ? [candidate as Record<string, unknown>] : []);
+    const selectedIds = Array.isArray(req.body?.sourceIds) ? new Set(req.body.sourceIds.filter((value: unknown): value is string => typeof value === 'string').slice(0, 50)) : null;
+    const selected = selectedIds ? candidates.filter((candidate) => selectedIds.has(String(candidate.sourceId || ''))) : candidates.slice(0, 50);
+    if (!selected.length) return res.status(400).json({ error: 'Choose at least one previewed publication to import.' });
+    await prisma.amrImportJob.update({ where: { id }, data: { status: AmrImportJobStatus.RUNNING, attempt: { increment: 1 }, errorMessage: null, startedAt: new Date() } });
+    const result = await createImportedPublicationDrafts(prisma, job.source, selected, req.user!.userId);
+    const completed = await prisma.amrImportJob.update({ where: { id }, data: { status: AmrImportJobStatus.COMPLETED, result: { imported: result.imported, skipped: result.skipped }, finishedAt: new Date() } });
+    await writeAdminLog(req.user?.userId, 'AMR_IMPORT_EXECUTED', 'AmrImportJob', id, { result: 'success', imported: result.imported.length, skipped: result.skipped.length, source: job.source });
+    res.json({ job: completed, ...result });
+  } catch (error) {
+    await prisma.amrImportJob.updateMany({ where: { id }, data: { status: AmrImportJobStatus.FAILED, errorMessage: safeErrorMessage(error, 'AMR import execution failed'), finishedAt: new Date() } });
+    await writeAdminLog(req.user?.userId, 'AMR_IMPORT_EXECUTION_FAILED', 'AmrImportJob', id, { result: 'failure' });
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to execute AMR import') });
+  }
+});
+
+app.post('/api/admin/amr-import-jobs/:id/retry', requireAdmin, importRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const previous = await prisma.amrImportJob.findUnique({ where: { id } });
+    if (!previous) return res.status(404).json({ error: 'AMR import job not found' });
+    if (!importSourceIsSupported(previous.source)) return res.status(400).json({ error: 'Only external-source imports can be retried.' });
+    const request = previous.request && typeof previous.request === 'object' && !Array.isArray(previous.request) ? previous.request as Record<string, unknown> : {};
+    const query = textValue(request.query, 500);
+    if (!query) return res.status(409).json({ error: 'The original import query is unavailable.' });
+    const job = await previewAmrImportJob(req.user!.userId, previous.source, query, request.limit, previous.queryId || undefined);
+    await writeAdminLog(req.user?.userId, 'AMR_IMPORT_RETRIED', 'AmrImportJob', job.id, { result: 'success', previousJobId: id, source: previous.source });
+    res.status(201).json(job);
+  } catch (error) {
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to retry AMR import') });
+  }
+});
+
+app.post('/api/admin/amr-findings/:id/moderation', requireAdmin, adminRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  const action = parseStringParam(req.body?.action) as FindingModerationAction;
+  if (!FINDING_MODERATION_ACTIONS.includes(action)) return res.status(400).json({ error: 'Invalid AMR finding moderation action' });
+  try {
+    const finding = await moderateFinding(prisma, id, req.user!.userId, action, parseJsonObject(req.body));
+    await writeAdminLog(req.user?.userId, `AMR_FINDING_${action}`, 'AmrFinding', id, { result: 'success', status: finding.curationStatus, notePresent: Boolean(textValue(req.body?.note, 2_000)), duplicateOfId: finding.duplicateOfId || undefined, linkedStrainId: finding.linkedStrainId || undefined });
+    res.json(finding);
+  } catch (error) {
+    const status = amrWorkflowErrorStatus(error);
+    await writeAdminLog(req.user?.userId, `AMR_FINDING_${action}_FAILED`, 'AmrFinding', id, { result: 'failure', statusCode: status });
+    res.status(status).json({ error: safeErrorMessage(error, 'Unable to moderate AMR finding') });
+  }
+});
+
+app.post('/api/admin/amr-findings/:id/notes', requireAdmin, adminRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const note = await addFindingModerationNote(prisma, id, req.user!.userId, req.body?.message, req.body?.visibleToSubmitter === true);
+    await writeAdminLog(req.user?.userId, 'AMR_FINDING_NOTE_ADDED', 'AmrFinding', id, { result: 'success', visibleToSubmitter: note.visibleToSubmitter });
+    res.status(201).json(note);
+  } catch (error) {
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to add AMR finding note') });
+  }
+});
+
+app.get('/api/admin/amr-publications', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = Math.max(1, parseOptionalInt(String(req.query.page || '')) || 1);
+    const pageSize = Math.min(100, Math.max(10, parseOptionalInt(String(req.query.pageSize || '')) || 25));
+    const status = parseStringParam(req.query.status as string);
+    const q = textValue(req.query.q, 240);
+    const where: Prisma.AmrPublicationWhereInput = {
+      ...(status && Object.values(AmrFindingStatus).includes(status as AmrFindingStatus) ? { curationStatus: status as AmrFindingStatus } : {}),
+      ...(q ? { OR: [{ title: { contains: q, mode: 'insensitive' } }, { authors: { contains: q, mode: 'insensitive' } }, { doi: { contains: q, mode: 'insensitive' } }, { pubmedId: { contains: q, mode: 'insensitive' } }] } : {}),
+    };
+    const [total, items] = await Promise.all([
+      prisma.amrPublication.count({ where }),
+      prisma.amrPublication.findMany({ where, include: { createdBy: { select: { id: true, name: true, email: true } }, reviewedBy: { select: { id: true, name: true, email: true } }, assignedReviewer: { select: { id: true, name: true, email: true } }, moderationNotes: { include: { author: { select: { name: true, email: true } } }, orderBy: { createdAt: 'desc' } }, revisions: { include: { actor: { select: { name: true, email: true } } }, orderBy: { createdAt: 'desc' } }, findings: { include: { finding: { select: { id: true, slug: true, title: true } } } } }, orderBy: { updatedAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+    ]);
+    res.json({ items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+  } catch {
+    res.status(500).json({ error: 'Unable to load AMR publications' });
+  }
+});
+
+app.post('/api/admin/amr-publications', requireAdmin, adminRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await createAdminPublication(prisma, parseJsonObject(req.body), req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_CREATED', 'AmrPublication', result.publication.id, { result: 'success', title: result.publication.title, duplicateCandidates: result.duplicates.length });
+    res.status(201).json(result);
+  } catch (error) {
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to create AMR publication') });
+  }
+});
+
+app.get('/api/admin/amr-publications/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const publication = await prisma.amrPublication.findUnique({ where: { id: parseStringParam(req.params.id) }, include: { createdBy: { select: { id: true, name: true, email: true } }, reviewedBy: { select: { id: true, name: true, email: true } }, assignedReviewer: { select: { id: true, name: true, email: true } }, moderationNotes: { include: { author: { select: { name: true, email: true } } }, orderBy: { createdAt: 'desc' } }, revisions: { include: { actor: { select: { name: true, email: true } } }, orderBy: { createdAt: 'desc' } }, findings: { include: { finding: { select: { id: true, slug: true, title: true } } } } } });
+    if (!publication) return res.status(404).json({ error: 'AMR publication not found' });
+    await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_OPENED', 'AmrPublication', publication.id, { result: 'success' });
+    res.json(publication);
+  } catch {
+    res.status(500).json({ error: 'Unable to load AMR publication' });
+  }
+});
+
+app.patch('/api/admin/amr-publications/:id', requireAdmin, adminRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const result = await updateAdminPublication(prisma, id, parseJsonObject(req.body), req.user!.userId);
+    await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_UPDATED', 'AmrPublication', id, { result: 'success', duplicateCandidates: result.duplicates.length });
+    res.json(result);
+  } catch (error) {
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to update AMR publication') });
+  }
+});
+
+app.post('/api/admin/amr-publications/:id/moderation', requireAdmin, adminRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  const action = parseStringParam(req.body?.action) as PublicationModerationAction;
+  if (!PUBLICATION_MODERATION_ACTIONS.includes(action)) return res.status(400).json({ error: 'Invalid AMR publication moderation action' });
+  try {
+    const publication = await moderatePublication(prisma, id, req.user!.userId, action, parseJsonObject(req.body));
+    await writeAdminLog(req.user?.userId, `AMR_PUBLICATION_${action}`, 'AmrPublication', id, { result: 'success', status: publication.curationStatus, notePresent: Boolean(textValue(req.body?.note, 2_000)), duplicateOfId: publication.duplicateOfId || undefined });
+    res.json(publication);
+  } catch (error) {
+    const status = amrWorkflowErrorStatus(error);
+    await writeAdminLog(req.user?.userId, `AMR_PUBLICATION_${action}_FAILED`, 'AmrPublication', id, { result: 'failure', statusCode: status });
+    res.status(status).json({ error: safeErrorMessage(error, 'Unable to moderate AMR publication') });
+  }
+});
+
+app.post('/api/admin/amr-publications/:id/notes', requireAdmin, adminRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  const id = parseStringParam(req.params.id);
+  try {
+    const note = await addPublicationModerationNote(prisma, id, req.user!.userId, req.body?.message, req.body?.visibleToSubmitter === true);
+    await writeAdminLog(req.user?.userId, 'AMR_PUBLICATION_NOTE_ADDED', 'AmrPublication', id, { result: 'success', visibleToSubmitter: note.visibleToSubmitter });
+    res.status(201).json(note);
+  } catch (error) {
+    res.status(amrWorkflowErrorStatus(error)).json({ error: safeErrorMessage(error, 'Unable to add AMR publication note') });
+  }
+});
+
 app.get('/api/admin/amr-findings', requireAmrAuthor, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const page = Math.max(1, parseOptionalInt(String(req.query.page || '')) || 1);
@@ -5408,6 +5884,41 @@ app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Authenticat
     res.status(500).json({ error: "Failed to register new strain in the database." });
   }
 });
+
+async function publishScheduledAmrContent() {
+  const now = new Date();
+  try {
+    const [findings, publications] = await Promise.all([
+      prisma.amrFinding.findMany({ where: { curationStatus: AmrFindingStatus.APPROVED, scheduledPublishAt: { lte: now } }, select: { id: true, title: true, createdById: true } }),
+      prisma.amrPublication.findMany({ where: { curationStatus: AmrFindingStatus.APPROVED, scheduledPublishAt: { lte: now } }, select: { id: true, title: true, createdById: true } }),
+    ]);
+    for (const finding of findings) {
+      const published = await prisma.$transaction(async (tx) => {
+        const result = await tx.amrFinding.updateMany({ where: { id: finding.id, curationStatus: AmrFindingStatus.APPROVED, scheduledPublishAt: { lte: now } }, data: { curationStatus: AmrFindingStatus.PUBLISHED, publishedAt: now, scheduledPublishAt: null } });
+        if (!result.count) return false;
+        await tx.amrFindingRevision.create({ data: { findingId: finding.id, action: 'SCHEDULED_PUBLICATION_EXECUTED', visibleToSubmitter: true, snapshot: { status: AmrFindingStatus.PUBLISHED } } });
+        await createNotification(tx, { userId: finding.createdById, type: NotificationType.AMR_FINDING, title: 'AMR finding published', body: `“${finding.title}” is now publicly visible.`, link: `/amr-findings-india` });
+        return true;
+      });
+      if (published) await writeAdminLog(undefined, 'AMR_FINDING_SCHEDULED_PUBLISHED', 'AmrFinding', finding.id, { result: 'success', system: true });
+    }
+    for (const publication of publications) {
+      const published = await prisma.$transaction(async (tx) => {
+        const result = await tx.amrPublication.updateMany({ where: { id: publication.id, curationStatus: AmrFindingStatus.APPROVED, scheduledPublishAt: { lte: now } }, data: { curationStatus: AmrFindingStatus.PUBLISHED, publishedAt: now, scheduledPublishAt: null } });
+        if (!result.count) return false;
+        await tx.amrPublicationRevision.create({ data: { publicationId: publication.id, action: 'SCHEDULED_PUBLICATION_EXECUTED', visibleToSubmitter: true, snapshot: { status: AmrFindingStatus.PUBLISHED } } });
+        if (publication.createdById) await createNotification(tx, { userId: publication.createdById, type: NotificationType.AMR_PUBLICATION, title: 'AMR publication published', body: `“${publication.title}” is now publicly visible.`, link: '/amr-findings-india/publications' });
+        return true;
+      });
+      if (published) await writeAdminLog(undefined, 'AMR_PUBLICATION_SCHEDULED_PUBLISHED', 'AmrPublication', publication.id, { result: 'success', system: true });
+    }
+  } catch (error) {
+    logEvent('error', 'amr_scheduled_publication_failed', { error: safeErrorMessage(error, 'Scheduled AMR publication failed') });
+  }
+}
+
+void publishScheduledAmrContent();
+setInterval(() => void publishScheduledAmrContent(), 60_000).unref();
 
 app.use((req: Request, res: Response) => {
   res.status(404).json({ error: "Not found" });

@@ -24,6 +24,9 @@ const textList = (value: unknown, max = 100) => Array.isArray(value)
   : typeof value === 'string' ? [...new Set(value.split(/[;,|\n]/).map((entry) => text(entry, 240)).filter((entry): entry is string => Boolean(entry)))].slice(0, max) : [];
 const booleanValue = (value: unknown) => value === true || value === 'true' ? true : value === false || value === 'false' ? false : undefined;
 const integerValue = (value: unknown) => {
+  // Optional numeric values commonly arrive from spreadsheets/JSON as empty strings.
+  // Treat those as absent, rather than turning them into a scientifically invalid zero.
+  if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return undefined;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 };
@@ -74,6 +77,12 @@ export const amrFindingInclude = {
   ...publicInclude,
   createdBy: { select: { id: true, name: true, email: true } },
   reviewedBy: { select: { id: true, name: true, email: true } },
+  assignedReviewer: { select: { id: true, name: true, email: true, role: true } },
+  approvedBy: { select: { id: true, name: true, email: true } },
+  publishedBy: { select: { id: true, name: true, email: true } },
+  archivedBy: { select: { id: true, name: true, email: true } },
+  linkedStrain: { select: { id: true, strainName: true, organism: { select: { id: true, scientificName: true } } } },
+  moderationNotes: { include: { author: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'desc' as const } },
   revisions: { include: { actor: { select: { name: true, email: true } } }, orderBy: { createdAt: 'desc' as const } },
 } satisfies Prisma.AmrFindingInclude;
 
@@ -82,7 +91,32 @@ function statusSummary(status: AmrFindingStatus) {
 }
 
 export function publicFinding(finding: Prisma.AmrFindingGetPayload<{ include: typeof publicInclude }>) {
-  return { ...finding, curationStatus: statusSummary(finding.curationStatus), curatorInterpretation: undefined, revisions: undefined };
+  const {
+    curatorInterpretation,
+    createdById,
+    reviewedById,
+    assignedReviewerId,
+    approvedById,
+    publishedById,
+    archivedById,
+    duplicateOfId,
+    previousVersionId,
+    linkedStrainId,
+    submissionDeclaration,
+    submissionSource,
+    revisionNumber,
+    submittedAt,
+    lastReviewedAt,
+    approvedAt,
+    rejectedAt,
+    rejectionReason,
+    changesRequestedAt,
+    changesRequestedMessage,
+    scheduledPublishAt,
+    archivedAt,
+    ...publicFields
+  } = finding;
+  return { ...publicFields, curationStatus: statusSummary(finding.curationStatus) };
 }
 
 function parseInput(body: AmrFindingInput, required = true) {
@@ -153,28 +187,32 @@ function locationRows(input: NormalizedAmrFindingInput) {
   });
 }
 
-export async function createAmrFinding(prisma: PrismaClient, body: AmrFindingInput, actorId: string) {
+type AmrDatabaseClient = PrismaClient | Prisma.TransactionClient;
+
+export async function createAmrFindingInTransaction(prisma: AmrDatabaseClient, body: AmrFindingInput, actorId: string) {
   const parsed = parseInput(body); if ('error' in parsed) throw new Error(parsed.error);
   const input = parsed.data; const baseSlug = slugify(input.title || 'amr-finding');
-  const slug = `${baseSlug}-${Date.now().toString(36)}`;
-  return prisma.$transaction(async (tx) => {
-    const relations = await relationData(tx, input);
+  const slug = `${baseSlug}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const relations = await relationData(prisma, input);
     const { domains, pathogens, genes, antimicrobials, antimicrobialClasses, mechanisms, keywords, institutions, mobileElements, locations, publication, accessions, ...fields } = input;
-    const finding = await tx.amrFinding.create({ data: {
+    const finding = await prisma.amrFinding.create({ data: {
       ...fields,
       slug, createdById: actorId,
       domains: { create: relations.domainTerms.map((term) => ({ termId: term.id })) }, pathogens: { create: relations.pathogens.map((pathogen) => ({ pathogenId: pathogen.id })) }, genes: { create: relations.genes.map((gene) => ({ geneId: gene.id })) }, antimicrobials: { create: relations.antimicrobials.map((antimicrobial) => ({ antimicrobialId: antimicrobial.id })) }, mechanisms: { create: relations.mechanisms.map((mechanism) => ({ mechanismId: mechanism.id })) },
       locations: { create: locationRows(input) }, keywords: { create: input.keywords.map((value) => ({ value })) }, institutions: { create: input.institutions.map((name) => ({ name })) }, mobileElements: { create: input.mobileElements.map((name) => ({ type: 'Not specified', name })) },
       accessions: { create: input.accessions.flatMap((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) ? [{ database: text((entry as Record<string, unknown>).database, 100) || 'Other', accession: text((entry as Record<string, unknown>).accession, 240) || '', url: safeExternalUrl((entry as Record<string, unknown>).url) }] : []).filter((entry) => entry.accession) },
     }, include: amrFindingInclude });
-    if (input.publication) {
+  if (input.publication) {
       const doi = normalizeDoi(input.publication.doi); const pubmedId = text(input.publication.pubmedId, 40);
-      const publication = doi ? await tx.amrPublication.upsert({ where: { doi }, update: { title: text(input.publication.title, 1_000) || input.sourceReference || '', authors: text(input.publication.authors, 2_000), journal: text(input.publication.journal, 500), publicationYear: integerValue(input.publication.publicationYear), externalUrl: safeExternalUrl(input.publication.externalUrl), openAccess: booleanValue(input.publication.openAccess) || false }, create: { doi, title: text(input.publication.title, 1_000) || input.sourceReference || '', authors: text(input.publication.authors, 2_000), journal: text(input.publication.journal, 500), publicationYear: integerValue(input.publication.publicationYear), pubmedId, externalUrl: safeExternalUrl(input.publication.externalUrl), openAccess: booleanValue(input.publication.openAccess) || false } }) : await tx.amrPublication.create({ data: { title: text(input.publication.title, 1_000) || input.sourceReference || '', authors: text(input.publication.authors, 2_000), journal: text(input.publication.journal, 500), publicationYear: integerValue(input.publication.publicationYear), pubmedId, externalUrl: safeExternalUrl(input.publication.externalUrl), openAccess: booleanValue(input.publication.openAccess) || false } });
-      await tx.amrFindingPublication.create({ data: { findingId: finding.id, publicationId: publication.id } });
-    }
-    await tx.amrFindingRevision.create({ data: { findingId: finding.id, actorId, action: 'CREATED_DRAFT', snapshot: { title: finding.title, curationStatus: finding.curationStatus } } });
-    return tx.amrFinding.findUniqueOrThrow({ where: { id: finding.id }, include: amrFindingInclude });
-  });
+    const publication = doi ? await prisma.amrPublication.upsert({ where: { doi }, update: { title: text(input.publication.title, 1_000) || input.sourceReference || '', authors: text(input.publication.authors, 2_000), journal: text(input.publication.journal, 500), publicationYear: integerValue(input.publication.publicationYear), externalUrl: safeExternalUrl(input.publication.externalUrl), openAccess: booleanValue(input.publication.openAccess) || false }, create: { doi, title: text(input.publication.title, 1_000) || input.sourceReference || '', authors: text(input.publication.authors, 2_000), journal: text(input.publication.journal, 500), publicationYear: integerValue(input.publication.publicationYear), pubmedId, externalUrl: safeExternalUrl(input.publication.externalUrl), openAccess: booleanValue(input.publication.openAccess) || false } }) : await prisma.amrPublication.create({ data: { title: text(input.publication.title, 1_000) || input.sourceReference || '', authors: text(input.publication.authors, 2_000), journal: text(input.publication.journal, 500), publicationYear: integerValue(input.publication.publicationYear), pubmedId, externalUrl: safeExternalUrl(input.publication.externalUrl), openAccess: booleanValue(input.publication.openAccess) || false } });
+    await prisma.amrFindingPublication.create({ data: { findingId: finding.id, publicationId: publication.id } });
+  }
+  await prisma.amrFindingRevision.create({ data: { findingId: finding.id, actorId, action: 'CREATED_DRAFT', snapshot: { title: finding.title, curationStatus: finding.curationStatus } } });
+  return prisma.amrFinding.findUniqueOrThrow({ where: { id: finding.id }, include: amrFindingInclude });
+}
+
+export async function createAmrFinding(prisma: PrismaClient, body: AmrFindingInput, actorId: string) {
+  return prisma.$transaction((tx) => createAmrFindingInTransaction(tx, body, actorId));
 }
 
 export async function updateAmrFinding(prisma: PrismaClient, id: string, body: AmrFindingInput, actorId: string) {
@@ -186,7 +224,7 @@ export async function updateAmrFinding(prisma: PrismaClient, id: string, body: A
     const { domains, pathogens, genes, antimicrobials, antimicrobialClasses, mechanisms, keywords, institutions, mobileElements, locations, publication, accessions, ...fields } = input;
     await tx.amrFinding.update({ where: { id }, data: fields });
     await Promise.all([tx.amrFindingDomain.deleteMany({ where: { findingId: id } }), tx.amrFindingPathogen.deleteMany({ where: { findingId: id } }), tx.amrFindingGene.deleteMany({ where: { findingId: id } }), tx.amrFindingAntimicrobial.deleteMany({ where: { findingId: id } }), tx.amrFindingMechanism.deleteMany({ where: { findingId: id } }), tx.amrFindingLocation.deleteMany({ where: { findingId: id } }), tx.amrFindingKeyword.deleteMany({ where: { findingId: id } }), tx.amrFindingInstitution.deleteMany({ where: { findingId: id } }), tx.amrFindingMobileElement.deleteMany({ where: { findingId: id } }), tx.amrFindingAccession.deleteMany({ where: { findingId: id } })]);
-    await tx.amrFinding.update({ where: { id }, data: { domains: { create: relations.domainTerms.map((term) => ({ termId: term.id })) }, pathogens: { create: relations.pathogens.map((pathogen) => ({ pathogenId: pathogen.id })) }, genes: { create: relations.genes.map((gene) => ({ geneId: gene.id })) }, antimicrobials: { create: relations.antimicrobials.map((antimicrobial) => ({ antimicrobialId: antimicrobial.id })) }, mechanisms: { create: relations.mechanisms.map((mechanism) => ({ mechanismId: mechanism.id })) }, locations: { create: locationRows(input) }, keywords: { create: input.keywords.map((value) => ({ value })) }, institutions: { create: input.institutions.map((name) => ({ name })) }, mobileElements: { create: input.mobileElements.map((name) => ({ type: 'Not specified', name })) } } });
+    await tx.amrFinding.update({ where: { id }, data: { domains: { create: relations.domainTerms.map((term) => ({ termId: term.id })) }, pathogens: { create: relations.pathogens.map((pathogen) => ({ pathogenId: pathogen.id })) }, genes: { create: relations.genes.map((gene) => ({ geneId: gene.id })) }, antimicrobials: { create: relations.antimicrobials.map((antimicrobial) => ({ antimicrobialId: antimicrobial.id })) }, mechanisms: { create: relations.mechanisms.map((mechanism) => ({ mechanismId: mechanism.id })) }, locations: { create: locationRows(input) }, keywords: { create: input.keywords.map((value) => ({ value })) }, institutions: { create: input.institutions.map((name) => ({ name })) }, mobileElements: { create: input.mobileElements.map((name) => ({ type: 'Not specified', name })) }, accessions: { create: input.accessions.flatMap((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) ? [{ database: text((entry as Record<string, unknown>).database, 100) || 'Other', accession: text((entry as Record<string, unknown>).accession, 240) || '', url: safeExternalUrl((entry as Record<string, unknown>).url) }] : []).filter((entry) => entry.accession) } } });
     await tx.amrFindingRevision.create({ data: { findingId: id, actorId, action: 'UPDATED', snapshot: { title: input.title, updatedFields: Object.keys(body) } } });
     return tx.amrFinding.findUniqueOrThrow({ where: { id }, include: amrFindingInclude });
   });

@@ -85,11 +85,39 @@ enum GenomeReferenceStatus {
 
 enum AmrFindingStatus {
   DRAFT
+  SUBMITTED
   UNDER_REVIEW
+  CHANGES_REQUESTED
   APPROVED
   PUBLISHED
   REJECTED
   ARCHIVED
+}
+
+enum AmrSubmissionDeclaration {
+  AUTHOR
+  ON_BEHALF_OF_AUTHORS
+  RELEVANT_PUBLICATION_SUGGESTION
+}
+
+enum AmrImportSource {
+  PUBMED
+  EUROPE_PMC
+  JSON_UPLOAD
+}
+
+enum AmrImportJobStatus {
+  DRAFT
+  PREVIEWED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum NotificationType {
+  AMR_FINDING
+  AMR_PUBLICATION
+  AMR_IMPORT
 }
 
 enum AmrEvidenceLevel {
@@ -151,7 +179,19 @@ model User {
   adminLogs               AdminLog[]                @relation("AdminLogs")
   amrFindingsCreated      AmrFinding[]              @relation("AmrFindingCreator")
   amrFindingsReviewed     AmrFinding[]              @relation("AmrFindingReviewer")
+  amrFindingsAssigned     AmrFinding[]              @relation("AmrFindingAssignedReviewer")
+  amrFindingsApproved     AmrFinding[]              @relation("AmrFindingApprovedBy")
+  amrFindingsPublished    AmrFinding[]              @relation("AmrFindingPublishedBy")
+  amrFindingsArchived     AmrFinding[]              @relation("AmrFindingArchivedBy")
   amrFindingRevisions     AmrFindingRevision[]      @relation("AmrFindingRevisionActor")
+  amrModerationNotes      AmrModerationNote[]       @relation("AmrModerationNoteAuthor")
+  amrPublicationsCreated  AmrPublication[]          @relation("AmrPublicationCreator")
+  amrPublicationsReviewed AmrPublication[]          @relation("AmrPublicationReviewer")
+  amrPublicationsAssigned AmrPublication[]          @relation("AmrPublicationAssignedReviewer")
+  amrPublicationRevisions AmrPublicationRevision[]  @relation("AmrPublicationRevisionActor")
+  notifications           Notification[]
+  amrImportQueries        AmrImportQuery[]          @relation("AmrImportQueryCreator")
+  amrImportJobs           AmrImportJob[]            @relation("AmrImportJobCreator")
 }
 
 model UserProfile {
@@ -257,6 +297,7 @@ model Strain {
   analysisRuns     AnalysisRun[]
   toolRuns         ToolRun[]
   genomeReferences GenomeReferenceFile[]
+  amrFindings     AmrFinding[]
 
   @@index([organismId])
   @@index([strainName])
@@ -558,15 +599,40 @@ model AmrFinding {
   hasGenomicData           Boolean                     @default(false)
   openAccess               Boolean                     @default(false)
   curationStatus           AmrFindingStatus            @default(DRAFT)
+  submissionDeclaration    AmrSubmissionDeclaration    @default(AUTHOR)
+  submissionSource         String                       @default("ADMIN")
   createdById              String
   reviewedById             String?
+  assignedReviewerId       String?
+  approvedById             String?
+  publishedById            String?
+  archivedById             String?
+  duplicateOfId            String?
+  previousVersionId        String?
+  linkedStrainId           Int?
+  revisionNumber           Int                          @default(1)
   createdAt                DateTime                     @default(now())
   updatedAt                DateTime                     @updatedAt
+  submittedAt              DateTime?
   lastReviewedAt           DateTime?
+  approvedAt               DateTime?
+  rejectedAt               DateTime?
+  rejectionReason          String?
+  changesRequestedAt       DateTime?
+  changesRequestedMessage  String?
   publishedAt              DateTime?
+  scheduledPublishAt       DateTime?
+  archivedAt               DateTime?
 
   createdBy          User                    @relation("AmrFindingCreator", fields: [createdById], references: [id], onDelete: Restrict)
   reviewedBy         User?                   @relation("AmrFindingReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  assignedReviewer   User?                   @relation("AmrFindingAssignedReviewer", fields: [assignedReviewerId], references: [id], onDelete: SetNull)
+  approvedBy         User?                   @relation("AmrFindingApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  publishedBy        User?                   @relation("AmrFindingPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
+  archivedBy         User?                   @relation("AmrFindingArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  duplicateOf        AmrFinding?             @relation("AmrFindingDuplicate", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates         AmrFinding[]            @relation("AmrFindingDuplicate")
+  linkedStrain       Strain?                 @relation(fields: [linkedStrainId], references: [id], onDelete: SetNull)
   domains            AmrFindingDomain[]
   pathogens          AmrFindingPathogen[]
   genes              AmrFindingGene[]
@@ -579,12 +645,17 @@ model AmrFinding {
   keywords           AmrFindingKeyword[]
   mobileElements     AmrFindingMobileElement[]
   revisions          AmrFindingRevision[]
+  moderationNotes    AmrModerationNote[]
 
   @@index([curationStatus, updatedAt])
   @@index([publicationYear])
   @@index([publicHealthImportance])
   @@index([evidenceLevel])
   @@index([createdById])
+  @@index([assignedReviewerId])
+  @@index([duplicateOfId])
+  @@index([linkedStrainId])
+  @@index([submissionSource, submittedAt])
 }
 
 model AmrControlledVocabulary {
@@ -712,18 +783,51 @@ model AmrFindingLocation {
 
 model AmrPublication {
   id            String   @id @default(uuid())
+  slug          String?  @unique
   title         String
   authors       String?
+  userRoleInPublication String?
   journal       String?
   publicationYear Int?
   doi           String?  @unique
   pubmedId      String?  @unique
+  pmcId         String?  @unique
+  europePmcId   String?  @unique
   externalUrl   String?
   citationText  String?
   openAccess    Boolean  @default(false)
+  submissionDeclaration AmrSubmissionDeclaration @default(AUTHOR)
+  submissionSource String @default("ADMIN")
+  curationStatus AmrFindingStatus @default(DRAFT)
+  createdById String?
+  reviewedById String?
+  assignedReviewerId String?
+  duplicateOfId String?
+  previousVersionId String?
+  revisionNumber Int @default(1)
+  submittedAt DateTime?
+  reviewedAt DateTime?
+  approvedAt DateTime?
+  publishedAt DateTime?
+  scheduledPublishAt DateTime?
+  archivedAt DateTime?
+  rejectionReason String?
+  changesRequestedMessage String?
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
   findings      AmrFindingPublication[]
+  createdBy User? @relation("AmrPublicationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  reviewedBy User? @relation("AmrPublicationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  assignedReviewer User? @relation("AmrPublicationAssignedReviewer", fields: [assignedReviewerId], references: [id], onDelete: SetNull)
+  duplicateOf AmrPublication? @relation("AmrPublicationDuplicate", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates AmrPublication[] @relation("AmrPublicationDuplicate")
+  moderationNotes AmrModerationNote[]
+  revisions AmrPublicationRevision[]
   @@index([publicationYear])
+  @@index([curationStatus, updatedAt])
+  @@index([createdById])
+  @@index([assignedReviewerId])
+  @@index([duplicateOfId])
 }
 
 model AmrFindingPublication {
@@ -780,12 +884,94 @@ model AmrFindingRevision {
   actorId   String?
   action    String
   note      String?
+  visibleToSubmitter Boolean @default(false)
   snapshot  Json?
   createdAt DateTime @default(now())
   finding   AmrFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
   actor     User?      @relation("AmrFindingRevisionActor", fields: [actorId], references: [id], onDelete: SetNull)
   @@index([findingId, createdAt])
   @@index([actorId])
+}
+
+model AmrPublicationRevision {
+  id            String   @id @default(uuid())
+  publicationId String
+  actorId       String?
+  action        String
+  note          String?
+  visibleToSubmitter Boolean @default(false)
+  snapshot      Json?
+  createdAt     DateTime @default(now())
+  publication   AmrPublication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  actor         User? @relation("AmrPublicationRevisionActor", fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([publicationId, createdAt])
+  @@index([actorId])
+}
+
+model AmrModerationNote {
+  id                  String   @id @default(uuid())
+  findingId           String?
+  publicationId       String?
+  authorId            String
+  message             String
+  visibleToSubmitter  Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  finding             AmrFinding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  publication         AmrPublication? @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  author              User @relation("AmrModerationNoteAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  @@index([findingId, createdAt])
+  @@index([publicationId, createdAt])
+  @@index([authorId])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, readAt, createdAt])
+}
+
+model AmrImportQuery {
+  id        String          @id @default(uuid())
+  name      String
+  source    AmrImportSource
+  query     String
+  active    Boolean         @default(true)
+  createdById String
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  createdBy User            @relation("AmrImportQueryCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  jobs      AmrImportJob[]
+  @@index([source, active])
+  @@index([createdById])
+}
+
+model AmrImportJob {
+  id          String             @id @default(uuid())
+  queryId     String?
+  source      AmrImportSource
+  request     Json
+  preview     Json?
+  result      Json?
+  status      AmrImportJobStatus @default(DRAFT)
+  attempt     Int                @default(0)
+  errorMessage String?
+  createdById String
+  createdAt   DateTime           @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  query       AmrImportQuery?    @relation(fields: [queryId], references: [id], onDelete: SetNull)
+  createdBy   User               @relation("AmrImportJobCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  @@index([source, status, createdAt])
+  @@index([queryId])
+  @@index([createdById])
 }
 
 model Assembly {

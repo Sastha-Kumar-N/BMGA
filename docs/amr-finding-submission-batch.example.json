@@ -1,0 +1,11 @@
+{
+  "findings": [
+    {
+      "title": "FICTIONAL BATCH EXAMPLE ONLY - replace before upload",
+      "keyFinding": "This fictional entry demonstrates a batch payload.",
+      "scientificSummary": "This is demonstration content, not a scientific AMR record.",
+      "sourceReference": "Fictional example only",
+      "submissionDeclaration": "RELEVANT_PUBLICATION_SUGGESTION"
+    }
+  ]
+}

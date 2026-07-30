@@ -1,0 +1,14 @@
+{
+  "title": "FICTIONAL EXAMPLE ONLY - replace before upload",
+  "keyFinding": "This fictional record demonstrates the structure expected by the AMR submission importer.",
+  "scientificSummary": "This is not a scientific finding and is included only to demonstrate field names. Do not upload it as evidence.",
+  "sourceReference": "Fictional example only",
+  "domains": ["Human Clinical", "One Health"],
+  "pathogens": ["Example organism"],
+  "genes": ["example-gene"],
+  "antimicrobialClasses": ["Example class"],
+  "evidenceLevel": "LEVEL_1",
+  "publicHealthImportance": "LOW",
+  "locations": [{ "country": "India", "state": "Example State" }],
+  "submissionDeclaration": "AUTHOR"
+}
