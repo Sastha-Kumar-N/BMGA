@@ -30,6 +30,12 @@ const integerValue = (value: unknown) => {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 };
+const decimalValue = (value: unknown) => {
+  if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+const hasValue = (value: unknown) => value !== undefined && value !== null && !(typeof value === 'string' && !value.trim());
 const dateValue = (value: unknown) => {
   if (!value) return undefined;
   const parsed = new Date(String(value));
@@ -140,6 +146,16 @@ function parseInput(body: AmrFindingInput, required = true) {
   if ((prevalenceNumerator !== undefined) !== (prevalenceDenominator !== undefined)) return { error: 'Prevalence requires both numerator and denominator.' } as const;
   if (prevalenceNumerator !== undefined && (!prevalenceDenominator || prevalenceNumerator > prevalenceDenominator)) return { error: 'Prevalence denominator must be greater than zero and no smaller than numerator.' } as const;
   const prevalencePercentage = prevalenceNumerator !== undefined && prevalenceDenominator !== undefined ? Number(((prevalenceNumerator / prevalenceDenominator) * 100).toFixed(2)) : undefined;
+  const locations = Array.isArray(body.locations) ? body.locations.slice(0, 50) : [];
+  for (const entry of locations) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return { error: 'Each location must be an object.' } as const;
+    const row = entry as Record<string, unknown>;
+    const latitude = decimalValue(row.latitude); const longitude = decimalValue(row.longitude);
+    if ((hasValue(row.latitude) && latitude === undefined) || (hasValue(row.longitude) && longitude === undefined)) return { error: 'Latitude and longitude must be valid decimal numbers.' } as const;
+    if ((latitude !== undefined) !== (longitude !== undefined)) return { error: 'Latitude and longitude must be supplied together.' } as const;
+    if (latitude !== undefined && (latitude < -90 || latitude > 90)) return { error: 'Latitude must be between -90 and 90.' } as const;
+    if (longitude !== undefined && (longitude < -180 || longitude > 180)) return { error: 'Longitude must be between -180 and 180.' } as const;
+  }
 
   return { data: {
     title: title!, keyFinding: keyFinding!, scientificSummary: scientificSummary!, sourceReference: sourceReference!, evidenceLevel, publicHealthImportance, importanceReason,
@@ -156,7 +172,7 @@ function parseInput(body: AmrFindingInput, required = true) {
     domains: textList(body.domains), pathogens: textList(body.pathogens), genes: textList(body.genes), antimicrobials: textList(body.antimicrobials),
     antimicrobialClasses: textList(body.antimicrobialClasses), mechanisms: textList(body.mechanisms), keywords: textList(body.keywords),
     institutions: textList(body.institutions), mobileElements: textList(body.mobileElements),
-    locations: Array.isArray(body.locations) ? body.locations.slice(0, 50) : [],
+    locations,
     publication: typeof body.publication === 'object' && body.publication && !Array.isArray(body.publication) ? body.publication as Record<string, unknown> : undefined,
     accessions: Array.isArray(body.accessions) ? body.accessions.slice(0, 100) : [],
   } satisfies NormalizedAmrFindingInput } as const;
@@ -182,8 +198,8 @@ async function relationData(client: PrismaClient | Prisma.TransactionClient, inp
 function locationRows(input: NormalizedAmrFindingInput) {
   return input.locations.flatMap((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
-    const row = entry as Record<string, unknown>; const latitude = Number(row.latitude); const longitude = Number(row.longitude);
-    return [{ country: text(row.country, 100) || 'India', state: text(row.state, 120), district: text(row.district, 120), city: text(row.city, 120), locality: text(row.locality, 180), facility: text(row.facility, 300), latitude: Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 ? latitude : undefined, longitude: Number.isFinite(longitude) && longitude >= -180 && longitude <= 180 ? longitude : undefined }];
+    const row = entry as Record<string, unknown>; const latitude = decimalValue(row.latitude); const longitude = decimalValue(row.longitude);
+    return [{ country: text(row.country, 100) || 'India', state: text(row.state, 120), district: text(row.district, 120), city: text(row.city, 120), locality: text(row.locality, 180), facility: text(row.facility, 300), latitude: latitude !== undefined && latitude >= -90 && latitude <= 90 ? latitude : undefined, longitude: longitude !== undefined && longitude >= -180 && longitude <= 180 ? longitude : undefined }];
   });
 }
 
@@ -277,7 +293,7 @@ export async function amrDashboard(prisma: PrismaClient) {
   const sources = count(findings.flatMap((finding) => finding.locations.map((location) => location.locality || location.facility).filter((value): value is string => Boolean(value))));
   const mdr = [{ label: 'MDR', value: findings.filter((finding) => finding.mdrStatus).length }, { label: 'XDR', value: findings.filter((finding) => finding.xdrStatus).length }, { label: 'PDR', value: findings.filter((finding) => finding.pdrStatus).length }];
   const evidence = [{ label: 'Clinical / phenotypic', value: findings.filter((finding) => finding.resistanceEvidence === AmrResistanceEvidence.PHENOTYPIC || finding.resistanceEvidence === AmrResistanceEvidence.COMBINED).length }, { label: 'Environmental / animal', value: findings.filter((finding) => finding.domains.some((row) => ['Environment', 'Wastewater', 'Veterinary', 'Livestock', 'Poultry', 'Aquaculture', 'Wildlife', 'Companion Animal'].includes(row.term.label))).length }, { label: 'Genomic', value: findings.filter((finding) => finding.hasGenomicData).length }];
-  return { totals: { findings: findings.length, publications: new Set(findings.flatMap((finding) => finding.publications.map((row) => row.publicationId))).size, states: states.length, pathogens: pathogens.length, genes: genes.length, antimicrobialClasses: classes.length, oneHealth: findings.filter((finding) => finding.oneHealth).length, genomic: findings.filter((finding) => finding.hasGenomicData).length, highImportance: findings.filter((finding) => finding.publicHealthImportance === AmrPublicHealthImportance.HIGH || finding.publicHealthImportance === AmrPublicHealthImportance.CRITICAL).length, updatedAt: findings[0]?.updatedAt || null }, charts: { years, states, domains, pathogens, genes, classes, mechanisms, sampleSources: sources, surveillanceMethods: count(findings.map((finding) => finding.analysisMethod || finding.studyDesign || 'Not reported')), mdr, evidence }, map: states.map((row) => ({ ...row, majorPathogens: pathogens.slice(0, 3).map((entry) => entry.label), majorClasses: classes.slice(0, 3).map((entry) => entry.label) })), records: findings.flatMap((finding) => finding.locations.filter((location) => Number.isFinite(location.latitude) && Number.isFinite(location.longitude)).map((location) => ({ id: finding.id, slug: finding.slug, title: finding.title, state: location.state, latitude: location.latitude, longitude: location.longitude, pathogens: finding.pathogens.map((row) => row.pathogen.scientificName), importance: finding.publicHealthImportance }))) };
+  return { totals: { findings: findings.length, publications: new Set(findings.flatMap((finding) => finding.publications.map((row) => row.publicationId))).size, states: states.length, pathogens: pathogens.length, genes: genes.length, antimicrobialClasses: classes.length, oneHealth: findings.filter((finding) => finding.oneHealth).length, genomic: findings.filter((finding) => finding.hasGenomicData).length, highImportance: findings.filter((finding) => finding.publicHealthImportance === AmrPublicHealthImportance.HIGH || finding.publicHealthImportance === AmrPublicHealthImportance.CRITICAL).length, updatedAt: findings[0]?.updatedAt || null }, charts: { years, states, domains, pathogens, genes, classes, mechanisms, sampleSources: sources, surveillanceMethods: count(findings.map((finding) => finding.analysisMethod || finding.studyDesign || 'Not reported')), mdr, evidence }, map: states.map((row) => ({ ...row, majorPathogens: pathogens.slice(0, 3).map((entry) => entry.label), majorClasses: classes.slice(0, 3).map((entry) => entry.label) })), records: findings.flatMap((finding) => finding.locations.map((location) => ({ location, latitude: Number(location.latitude), longitude: Number(location.longitude) })).filter(({ latitude, longitude }) => Number.isFinite(latitude) && Number.isFinite(longitude)).map(({ location, latitude, longitude }) => ({ id: finding.id, slug: finding.slug, title: finding.title, state: location.state, latitude, longitude, pathogens: finding.pathogens.map((row) => row.pathogen.scientificName), importance: finding.publicHealthImportance }))) };
 }
 
 export async function amrFilterOptions(prisma: PrismaClient) {

@@ -100,17 +100,19 @@ export default function AboutTeamDirectory() {
 }
 
 function MemberCard({ member, section }: { member: TeamMember; section: TeamSection }) {
+  const isPortalLead = section === 'PLATFORM' && member.name.trim().toLowerCase() === 'sastha kumar n';
   return (
-    <article className="flex h-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg">
+    <article className={`flex h-full flex-col overflow-hidden rounded-lg border bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg ${isPortalLead ? 'border-teal-300 border-t-4 border-t-teal-600 shadow-md hover:border-teal-500' : 'border-slate-200 hover:border-orange-200'}`}>
       <div className="bg-[#0B1B3A]">
         {member.portraitSrc ? <Image src={member.portraitSrc} alt={`Portrait of ${member.name}`} width={1200} height={900} sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw" className="h-auto w-full rounded-t-lg object-contain" priority /> : <div role="img" aria-label={`Portrait placeholder for ${member.name}`} className="flex min-h-56 items-center justify-center text-orange-300"><UserRound size={74} /></div>}
       </div>
       <div className="flex flex-1 flex-col p-6">
-        <p className="text-xs font-black uppercase text-orange-600">{section === 'LEADERSHIP' ? 'Scientific leadership' : 'Platform development'}</p>
+        <p className={`text-xs font-black uppercase ${isPortalLead ? 'text-teal-700' : 'text-orange-600'}`}>{isPortalLead ? 'BMGA Portal Lead' : section === 'LEADERSHIP' ? 'Scientific leadership' : 'Platform development'}</p>
         <h3 className="mt-3 text-2xl font-black">{member.name}</h3>
         {member.title && <p className="mt-3 flex items-start gap-2 text-sm font-black text-slate-700"><Building2 className="mt-0.5 shrink-0 text-teal-700" size={16} />{member.title}</p>}
         {member.affiliation && <p className="mt-2 flex items-start gap-2 text-sm font-semibold text-slate-500"><BookOpenCheck className="mt-0.5 shrink-0 text-teal-700" size={16} />{member.affiliation}</p>}
         {member.contribution && <p className="mt-5 whitespace-pre-wrap text-sm font-semibold leading-7 text-slate-600">{member.contribution}</p>}
+        {isPortalLead && <div className="mt-5 border-l-2 border-teal-600 bg-teal-50 px-4 py-3"><p className="text-[10px] font-black uppercase tracking-widest text-teal-800">Platform focus</p><p className="mt-2 text-xs font-bold leading-5 text-teal-950">Portal architecture, scientific data integration, genomic analysis workflows, and research-focused user experience.</p></div>}
         {member.email && <a href={`mailto:${member.email}`} className="mt-auto pt-6 inline-flex min-h-11 items-center gap-2 text-sm font-black text-orange-700 hover:text-[#0B1B3A]"><Mail size={16} />{member.email}</a>}
       </div>
     </article>

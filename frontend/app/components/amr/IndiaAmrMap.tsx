@@ -13,13 +13,15 @@ function Viewport({ records }: { records: AmrDashboard['records'] }) {
   const map = useMap();
   useEffect(() => {
     map.invalidateSize({ animate: false });
-    if (records.length === 0) map.fitBounds(INDIA_BOUNDS, { padding: [18, 18] });
-  }, [map, records.length]);
+    if (records.length === 1) map.setView([records[0].latitude, records[0].longitude], 6, { animate: false });
+    else if (records.length > 1) map.fitBounds(records.map((record) => [record.latitude, record.longitude] as [number, number]), { padding: [32, 32], maxZoom: 5 });
+    else map.setView(INDIA_CENTER, 5, { animate: false });
+  }, [map, records]);
   return null;
 }
 
 export default function IndiaAmrMap({ data, selectedState, onSelectState }: { data: AmrDashboard | null; selectedState?: string; onSelectState: (state?: string) => void }) {
-  const points = data?.records || [];
+  const points = (data?.records || []).filter((record) => record.latitude >= INDIA_BOUNDS[0][0] && record.latitude <= INDIA_BOUNDS[1][0] && record.longitude >= INDIA_BOUNDS[0][1] && record.longitude <= INDIA_BOUNDS[1][1]);
   const states = data?.map || [];
   return (
     <section aria-labelledby="amr-india-map-title" className="overflow-hidden border border-slate-200 bg-white shadow-sm">
@@ -29,7 +31,7 @@ export default function IndiaAmrMap({ data, selectedState, onSelectState }: { da
       </div>
       <div className="grid min-h-[440px] lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="h-[440px] min-w-0 bg-[#dceff3]">
-          <MapContainer center={INDIA_CENTER} zoom={4} minZoom={3} maxZoom={12} scrollWheelZoom className="h-full w-full" style={{ height: '100%', width: '100%' }} aria-label="Map of AMR findings in India">
+          <MapContainer center={INDIA_CENTER} zoom={5} minZoom={4} maxZoom={12} maxBounds={INDIA_BOUNDS} maxBoundsViscosity={0.8} scrollWheelZoom className="h-full w-full" style={{ height: '100%', width: '100%' }} aria-label="Map of AMR findings in India">
             <Viewport records={points} />
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
             {points.map((record) => <CircleMarker key={record.id} center={[record.latitude, record.longitude]} radius={record.importance === 'CRITICAL' ? 10 : record.importance === 'HIGH' ? 8 : 6} pathOptions={{ color: record.importance === 'CRITICAL' ? '#be123c' : '#0f766e', fillColor: record.importance === 'CRITICAL' ? '#fb7185' : '#14b8a6', fillOpacity: 0.85, weight: 2 }}><Popup><p className="text-[10px] font-black uppercase tracking-widest text-orange-600">{record.state || 'India'}</p><p className="mt-1 text-sm font-black text-slate-900">{record.title}</p><p className="mt-1 text-xs font-semibold text-slate-600">{record.pathogens.join(', ') || 'Pathogen not reported'}</p><Link className="mt-3 inline-block text-xs font-black text-teal-700 underline" href={`/amr-findings-india/${record.slug}`}>View finding</Link></Popup></CircleMarker>)}
