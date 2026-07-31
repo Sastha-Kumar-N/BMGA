@@ -267,8 +267,8 @@ export function OrganismSubmissionForm({ surveillanceMode = false }: { surveilla
             <Field label="BioProject Accession" value={form.bioprojectAccession} onChange={(value) => setForm({ ...form, bioprojectAccession: value })} />
             <Field label="Assembly Accession" value={form.assemblyAccession} onChange={(value) => setForm({ ...form, assemblyAccession: value })} />
             <Field label="Assembly Status" value={form.genomeStatus} onChange={(value) => setForm({ ...form, genomeStatus: value })} />
-            <Field label="Genome Size" value={form.genomeSize} onChange={(value) => setForm({ ...form, genomeSize: value })} />
-            <Field label="GC Content" value={form.gcContent} onChange={(value) => setForm({ ...form, gcContent: value })} />
+            <Field label="Genome Size (bp)" value={form.genomeSize} onChange={(value) => setForm({ ...form, genomeSize: value })} type="number" min={1} step={1} />
+            <Field label="GC Content (%)" value={form.gcContent} onChange={(value) => setForm({ ...form, gcContent: value })} type="number" min={0} max={100} step="0.01" />
             <Field label="Repository Link" value={form.repoLink} onChange={(value) => setForm({ ...form, repoLink: value })} />
           </div>
           <Section title="Surveillance Provenance & Evidence" />
@@ -363,12 +363,15 @@ function Section({ title }: { title: string }) {
   return <h2 className="border-b border-slate-100 pb-3 text-xl font-black tracking-tight">{title}</h2>;
 }
 
-function Field({ label, value, onChange, type = 'text', required = false }: {
+function Field({ label, value, onChange, type = 'text', required = false, min, max, step }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   required?: boolean;
+  min?: number;
+  max?: number;
+  step?: number | string;
 }) {
   return (
     <label className="block">
@@ -376,6 +379,9 @@ function Field({ label, value, onChange, type = 'text', required = false }: {
       <input
         required={required}
         type={type}
+        min={min}
+        max={max}
+        step={step}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold outline-none transition focus:border-orange-500 focus:bg-white"

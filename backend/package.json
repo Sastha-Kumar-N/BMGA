@@ -14,7 +14,8 @@
     "docker:migrate": "prisma migrate deploy && node dist/prisma/seed.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "audit:prod": "npm audit --omit=dev",
-    "import:results": "tsx scripts/importResults.ts"
+    "import:results": "tsx scripts/importResults.ts",
+    "verify:stored-files": "tsx scripts/verifyStoredFiles.ts"
   },
   "keywords": [],
   "author": "",

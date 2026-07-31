@@ -258,7 +258,7 @@ export default function IndiaOrganismAtlas({ strains, activeStrainId, onOpenOrga
                     </p>
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <AtlasPopupMetric label="Genome" value={formatGenomeSize(point.genomeSize)} />
-                      <AtlasPopupMetric label="GC" value={point.gcContent ? `${point.gcContent}%` : 'N/A'} />
+                      <AtlasPopupMetric label="GC" value={point.gcContent !== null && point.gcContent !== undefined ? `${point.gcContent}%` : 'N/A'} />
                       <AtlasPopupMetric label="BioSample" value={point.biosampleAccession || 'N/A'} />
                       <AtlasPopupMetric label="Assembly" value={point.assemblyAccession || 'N/A'} />
                     </div>

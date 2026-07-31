@@ -16,6 +16,7 @@ type ResultFile = {
   fileType?: string | null;
   description?: string | null;
   downloadPath?: string;
+  integrityStatus?: string | null;
 };
 
 type ToolResult = {
@@ -163,6 +164,7 @@ function tableFromJson(table: any): ResultTable {
 function genericToolToApi(run: any): ToolResult {
   const key = normalizeToolName(run.toolName);
   const base = emptyTool(key);
+  const unavailableFiles = (run.files || []).filter((file: any) => ['MISSING', 'FAILED'].includes(String(file.integrityStatus || '').toUpperCase()));
 
   return {
     ...base,
@@ -170,14 +172,18 @@ function genericToolToApi(run: any): ToolResult {
     version: run.version,
     runDate: run.finishedAt || run.updatedAt || run.createdAt,
     summary: (run.summary || {}) as JsonMap,
-    warnings: Array.isArray(run.warnings) ? run.warnings : run.warnings ? [run.warnings] : [],
+    warnings: [
+      ...(Array.isArray(run.warnings) ? run.warnings : run.warnings ? [run.warnings] : []),
+      ...(unavailableFiles.length ? [`${unavailableFiles.length} stored result file${unavailableFiles.length === 1 ? '' : 's'} is unavailable and has been withheld.`] : []),
+    ],
     errors: Array.isArray(run.errors) ? run.errors : run.errors ? [run.errors] : [],
     tables: (run.tables || []).map(tableFromJson),
-    files: (run.files || []).map((file: any) => ({
+    files: (run.files || []).filter((file: any) => !['MISSING', 'FAILED'].includes(String(file.integrityStatus || '').toUpperCase())).map((file: any) => ({
       id: file.id,
       fileName: file.fileName,
       fileType: file.fileType,
       description: file.description,
+      integrityStatus: file.integrityStatus,
       downloadPath: `/organisms/${run.organismId}/downloads/${key}/${file.id}`,
     })),
   };
@@ -439,8 +445,8 @@ function getOrganismSummary(organism: any, tools: Record<string, ToolResult>) {
   const abricate = tools.abricate?.summary || {};
 
   return cleanSummary({
-    genome_size: primaryStrain?.genomeSize || primaryAssembly?.totalLength || firstToolMetric(tools, ["genome_size", "genome_size_bp", "total_length", "total_length_bp"]) || Number(spades.total_length_mb || 0) * 1_000_000 || undefined,
-    gc_percent: primaryStrain?.gcContent ? Number(primaryStrain.gcContent) : quast.gc_percent || firstToolMetric(tools, ["gc_percent", "gc_content"]),
+    genome_size: primaryStrain?.genomeSize ?? primaryAssembly?.totalLength ?? firstToolMetric(tools, ["genome_size", "genome_size_bp", "total_length", "total_length_bp"]) ?? (Number(spades.total_length_mb || 0) * 1_000_000 || undefined),
+    gc_percent: primaryStrain?.gcContent !== null && primaryStrain?.gcContent !== undefined ? Number(primaryStrain.gcContent) : quast.gc_percent ?? firstToolMetric(tools, ["gc_percent", "gc_content"]),
     contig_count: primaryAssembly?.contigCount || spades.contigs_generated || firstToolMetric(tools, ["contig_count", "contigs", "total_contigs"]),
     n50: primaryAssembly?.n50 || (typeof quast.n50_kb === "number" ? quast.n50_kb * 1000 : undefined),
     assembly_level: primaryAssembly?.assemblyLevel || primaryStrain?.genomeStatus,
@@ -600,7 +606,7 @@ export async function saveNormalizedToolRun(
     finishedAt?: Date;
     summary: JsonMap;
     tables: { tableName: string; columns: string[]; rows: JsonMap[] }[];
-    files: { fileName: string; fileType?: string; filePath: string; description?: string }[];
+    files: { fileName: string; fileType?: string; filePath: string; description?: string; fileSizeBytes?: number; checksumSha256?: string; integrityStatus?: string; integrityCheckedAt?: Date; integrityError?: string }[];
     warnings: unknown[];
     errors: unknown[];
   }
@@ -640,6 +646,11 @@ export async function saveNormalizedToolRun(
           fileType: file.fileType,
           filePath: file.filePath,
           description: file.description,
+          fileSizeBytes: file.fileSizeBytes,
+          checksumSha256: file.checksumSha256,
+          integrityStatus: file.integrityStatus,
+          integrityCheckedAt: file.integrityCheckedAt,
+          integrityError: file.integrityError,
         })),
       },
     };

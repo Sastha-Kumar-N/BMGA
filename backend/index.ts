@@ -35,6 +35,7 @@ import {
   configuredStorageDriver,
   deleteStoredFiles,
   contentTypeForFileName,
+  ensureStorageFolders,
   readStoredTextFile,
   saveGenomeReferenceFile,
   saveProfilePhotoFile,
@@ -694,6 +695,37 @@ function parseOptionalFloat(value: unknown) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function parseStrainNumericFields(body: Record<string, unknown>) {
+  const latitude = parseOptionalFloat(body.latitude);
+  const longitude = parseOptionalFloat(body.longitude);
+  const genomeSize = parseOptionalInt(body.genomeSize);
+  const gcContent = parseOptionalFloat(body.gcContent);
+
+  const hasValue = (value: unknown) => value !== undefined && value !== null && value !== '';
+  if ((hasValue(body.latitude) && latitude === undefined) || (hasValue(body.longitude) && longitude === undefined)) {
+    return { error: 'Latitude and longitude must be valid decimal numbers' as const };
+  }
+  if (latitude !== undefined && (latitude < -90 || latitude > 90)) {
+    return { error: 'Latitude must be between -90 and 90' as const };
+  }
+  if (longitude !== undefined && (longitude < -180 || longitude > 180)) {
+    return { error: 'Longitude must be between -180 and 180' as const };
+  }
+  if (hasValue(body.genomeSize) && (genomeSize === undefined || genomeSize <= 0)) {
+    return { error: 'Genome size must be a whole number greater than zero (base pairs).' as const };
+  }
+  if (hasValue(body.gcContent) && (gcContent === undefined || gcContent < 0 || gcContent > 100)) {
+    return { error: 'GC content must be a percentage between 0 and 100.' as const };
+  }
+
+  return { data: { latitude, longitude, genomeSize, gcContent } };
+}
+
+function numericUpdateValue(body: Record<string, unknown>, field: string, parsed: number | undefined) {
+  if (!Object.prototype.hasOwnProperty.call(body, field)) return undefined;
+  return body[field] === '' || body[field] === null ? null : parsed;
+}
+
 function parseOptionalDate(value: unknown) {
   if (!value || typeof value !== "string") return undefined;
   const parsed = new Date(value);
@@ -964,21 +996,11 @@ function buildOrganismUploadData(body: Record<string, unknown>) {
     return { error: "Strain name is required" as const };
   }
 
-  const latitude = parseOptionalFloat(body.latitude);
-  const longitude = parseOptionalFloat(body.longitude);
-  if ((body.latitude !== undefined && body.latitude !== "" && latitude === undefined) || (body.longitude !== undefined && body.longitude !== "" && longitude === undefined)) {
-    return { error: "Latitude and longitude must be valid decimal numbers" as const };
-  }
-  if (latitude !== undefined && (latitude < -90 || latitude > 90)) {
-    return { error: "Latitude must be between -90 and 90" as const };
-  }
-  if (longitude !== undefined && (longitude < -180 || longitude > 180)) {
-    return { error: "Longitude must be between -180 and 180" as const };
-  }
+  const numericFields = parseStrainNumericFields(body);
+  if ('error' in numericFields) return { error: numericFields.error };
+  const { latitude, longitude, genomeSize, gcContent } = numericFields.data;
 
   const taxonomyId = parseOptionalInt(body.taxonomyId);
-  const genomeSize = parseOptionalInt(body.genomeSize);
-  const gcContent = parseOptionalFloat(body.gcContent);
 
   const country = textValue(body.country, 120) || "India";
 
@@ -1531,6 +1553,7 @@ function parseFlexibleSummary(fileName: string, fileContent: string, existingSum
   const parsed: Record<string, unknown> = { ...summary };
   const interestingKeys = new Set([
     'genome_size',
+    'genome_size_bp',
     'genome size',
     'genome_length',
     'genome length',
@@ -1539,6 +1562,7 @@ function parseFlexibleSummary(fileName: string, fileContent: string, existingSum
     'gc_percent',
     'gc content',
     'gc_content',
+    'gc_percent',
     'n50',
     'l50',
     'contigs',
@@ -1555,17 +1579,25 @@ function parseFlexibleSummary(fileName: string, fileContent: string, existingSum
   ]);
 
   for (const line of lines) {
-    const match = /^([A-Za-z0-9 _./%-]{2,80})\s*[:=]\s*(.+)$/.exec(line);
+    const match = /^([A-Za-z0-9 _./%()\[\]-]{2,80})\s*[:=]\s*(.+)$/.exec(line);
     if (!match) continue;
 
-    const rawKey = match[1].trim().toLowerCase().replace(/[\s./%-]+/g, '_');
+    const rawKey = match[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     const rawValue = match[2].trim();
-    const numeric = Number(rawValue.replace(/[,xX%]/g, ''));
+    const numericMatch = /^(-?\d+(?:\.\d+)?)\s*(bp|kb|mb|gb|%|x)?\b/i.exec(rawValue.replace(/,/g, ''));
+    let numeric = numericMatch ? Number(numericMatch[1]) : Number(rawValue.replace(/[,xX%]/g, ''));
+    const unit = numericMatch?.[2]?.toLowerCase();
+    if (Number.isFinite(numeric) && /(genome|total_?length|assembly_?length)/i.test(rawKey)) {
+      if (unit === 'kb') numeric *= 1_000;
+      if (unit === 'mb') numeric *= 1_000_000;
+      if (unit === 'gb') numeric *= 1_000_000_000;
+      numeric = Math.round(numeric);
+    }
     const normalizedValue = Number.isFinite(numeric) ? numeric : rawValue.slice(0, 240);
     if (interestingKeys.has(rawKey)) {
       parsed[rawKey] = normalizedValue;
-      if (['genome_size', 'genome_length', 'total_length'].includes(rawKey)) parsed.genome_size = normalizedValue;
-      if (['gc', 'gc_content'].includes(rawKey)) parsed.gc_percent = normalizedValue;
+      if (['genome_size', 'genome_size_bp', 'genome_length', 'total_length'].includes(rawKey)) parsed.genome_size = normalizedValue;
+      if (['gc', 'gc_content', 'gc_percent'].includes(rawKey)) parsed.gc_percent = normalizedValue;
       if (['contigs', 'total_contigs'].includes(rawKey)) parsed.contig_count = normalizedValue;
       if (rawKey === 'cds') parsed.cds_count = normalizedValue;
       if (rawKey === 'trna') parsed.trna_count = normalizedValue;
@@ -1582,6 +1614,41 @@ function parseFlexibleSummary(fileName: string, fileContent: string, existingSum
   }
 
   return parsed;
+}
+
+function genomeMetricsFromSummary(summary: Record<string, unknown>) {
+  const numberValue = (keys: string[]) => {
+    for (const key of keys) {
+      const value = summary[key];
+      const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.replace(/[,xX%]/g, '')) : Number.NaN;
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
+  };
+
+  const genomeSizeValue = numberValue(['genome_size', 'genome_size_bp', 'genome_length', 'total_length', 'total_length_bp']);
+  const gcContentValue = numberValue(['gc_percent', 'gc_content', 'gc']);
+  return {
+    genomeSize: genomeSizeValue && Number.isInteger(Math.round(genomeSizeValue)) && genomeSizeValue > 0 ? Math.round(genomeSizeValue) : undefined,
+    gcContent: gcContentValue !== undefined && gcContentValue >= 0 && gcContentValue <= 100 ? gcContentValue : undefined,
+  };
+}
+
+async function fillMissingStrainGenomeMetrics(strainId: number | null, summary: Record<string, unknown>) {
+  if (!strainId) return;
+  const inferred = genomeMetricsFromSummary(summary);
+  if (inferred.genomeSize === undefined && inferred.gcContent === undefined) return;
+
+  const strain = await prisma.strain.findUnique({
+    where: { id: strainId },
+    select: { genomeSize: true, gcContent: true },
+  });
+  if (!strain) return;
+
+  const data: Prisma.StrainUpdateInput = {};
+  if (strain.genomeSize === null && inferred.genomeSize !== undefined) data.genomeSize = inferred.genomeSize;
+  if (strain.gcContent === null && inferred.gcContent !== undefined) data.gcContent = inferred.gcContent;
+  if (Object.keys(data).length) await prisma.strain.update({ where: { id: strainId }, data });
 }
 
 async function ingestSubmissionMayaFiles(submissionId: string, organismId: number, strainId: number) {
@@ -1631,10 +1698,15 @@ async function ingestSubmissionMayaFiles(submissionId: string, organismId: numbe
           fileType: file.fileType,
           filePath: publishedPath,
           description: `${file.toolName} result approved from submission ${submissionId}`,
+          fileSizeBytes: file.fileSizeBytes,
+          checksumSha256: file.checksumSha256,
+          integrityStatus: 'VERIFIED',
+          integrityCheckedAt: new Date(),
         }],
         warnings: parseJsonArray(file.warnings),
         errors,
       });
+      await fillMissingStrainGenomeMetrics(strainId, summary);
       const amrDetections = await syncAmrGenesFromToolRows(prisma, savedRun.id, strainId, normalizeToolName(file.toolName), parsedTable.rows);
 
       await prisma.submissionFile.update({
@@ -5525,6 +5597,9 @@ app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: Authentic
       lastVerifiedAt,
     } = req.body;
 
+    const numericFields = parseStrainNumericFields(req.body || {});
+    if ('error' in numericFields) return res.status(400).json({ error: numericFields.error });
+
     const updated = await prisma.strain.update({
       where: { id: strainId },
       data: {
@@ -5541,11 +5616,11 @@ app.patch('/api/admin/strains/:id/metadata', requireAdmin, async (req: Authentic
         city,
         collectionDate: collectionDate ? new Date(collectionDate) : undefined,
         locationText,
-        latitude: latitude !== undefined && latitude !== "" ? Number(latitude) : undefined,
-        longitude: longitude !== undefined && longitude !== "" ? Number(longitude) : undefined,
+        latitude: numericUpdateValue(req.body || {}, 'latitude', numericFields.data.latitude),
+        longitude: numericUpdateValue(req.body || {}, 'longitude', numericFields.data.longitude),
         genomeStatus,
-        genomeSize: genomeSize !== undefined && genomeSize !== "" ? Number(genomeSize) : undefined,
-        gcContent: gcContent !== undefined && gcContent !== "" ? Number(gcContent) : undefined,
+        genomeSize: numericUpdateValue(req.body || {}, 'genomeSize', numericFields.data.genomeSize),
+        gcContent: numericUpdateValue(req.body || {}, 'gcContent', numericFields.data.gcContent),
         repoLink,
         metadata: parseJsonObject(metadata) as Prisma.InputJsonValue,
         surveillanceScope: parseSurveillanceScope(surveillanceScope, country),
@@ -5608,15 +5683,16 @@ app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req:
       fileName: validatedFile.fileName,
       fileContent: validatedFile.fileContent,
     }) : undefined;
+    const normalizedSummary = validatedFile
+      ? parseFlexibleSummary(validatedFile.fileName, validatedFile.fileContent, summary)
+      : parseJsonObject(summary);
 
     const savedRun = await saveNormalizedToolRun(prisma, numericOrganismId, numericStrainId, {
       toolName,
       status: status || "completed",
       version,
       finishedAt: new Date(),
-      summary: validatedFile
-        ? parseFlexibleSummary(validatedFile.fileName, validatedFile.fileContent, summary)
-        : parseJsonObject(summary),
+      summary: normalizedSummary,
       tables: parsedTable.columns.length ? [{
         tableName: tableName || `${toolName} results`,
         columns: parsedTable.columns,
@@ -5627,10 +5703,15 @@ app.post('/api/admin/maya-results', importRateLimiter, requireAdmin, async (req:
         fileType: path.extname(rawFileName).replace('.', '') || 'raw',
         filePath: savedFilePath,
         description: `${toolName} MAYA upload`,
+        fileSizeBytes: Buffer.byteLength(validatedFile!.fileContent, 'utf8'),
+        checksumSha256: createHash('sha256').update(validatedFile!.fileContent, 'utf8').digest('hex'),
+        integrityStatus: 'VERIFIED',
+        integrityCheckedAt: new Date(),
       }] : [],
       warnings: parseJsonArray(warnings),
       errors: parseJsonArray(errors),
     });
+    await fillMissingStrainGenomeMetrics(numericStrainId, normalizedSummary);
     const amrDetections = await syncAmrGenesFromToolRows(
       prisma,
       savedRun.id,
@@ -5840,6 +5921,8 @@ app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Authenticat
     if (!Number.isInteger(numericOrganismId) || numericOrganismId <= 0 || typeof strainName !== 'string' || !strainName.trim()) {
       return res.status(400).json({ error: 'A valid organismId and strainName are required' });
     }
+    const numericFields = parseStrainNumericFields(req.body || {});
+    if ('error' in numericFields) return res.status(400).json({ error: numericFields.error });
 
     const newStrain = await prisma.strain.create({
       data: {
@@ -5857,11 +5940,11 @@ app.post('/api/strains', adminRateLimiter, requireAdmin, async (req: Authenticat
         state,
         collectionDate: collectionDate ? new Date(collectionDate) : undefined,
         locationText,
-        latitude: latitude !== undefined && latitude !== "" ? parseFloat(latitude) : undefined,
-        longitude: longitude !== undefined && longitude !== "" ? parseFloat(longitude) : undefined,
+        latitude: numericFields.data.latitude,
+        longitude: numericFields.data.longitude,
         genomeStatus,
-        genomeSize: genomeSize !== undefined && genomeSize !== "" ? Number(genomeSize) : undefined,
-        gcContent: gcContent !== undefined && gcContent !== "" ? Number(gcContent) : undefined,
+        genomeSize: numericFields.data.genomeSize,
+        gcContent: numericFields.data.gcContent,
         repoLink,
         metadata: parseJsonObject(metadata) as Prisma.InputJsonValue,
         surveillanceScope: parseSurveillanceScope(surveillanceScope, country),
@@ -5949,6 +6032,7 @@ app.use((error: Error, req: Request, res: Response, _next: NextFunction) => {
 });
 // ─── START SERVER ────────────────────────────────────────────────────────────
 
+ensureStorageFolders();
 app.listen(PORT, '0.0.0.0', () => {
   logEvent('info', 'api_started', { port: PORT, environment: process.env.NODE_ENV || 'development' });
 });

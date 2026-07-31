@@ -625,8 +625,10 @@ function ModeButton({ active, onClick, label }: { active: boolean; onClick: () =
   return <button type="button" onClick={onClick} className={`min-h-10 rounded-md px-4 text-xs font-black ${active ? 'bg-[#0B1B3A] text-white' : 'text-slate-600 hover:bg-white'}`}>{label}</button>;
 }
 
-function TextInput({ label, value, onChange, required = false }: { label: string; value: string; onChange: (value: string) => void; required?: boolean }) {
-  return <label className="block"><span className="mb-2 block text-xs font-black text-slate-600">{label}{required && <span className="text-red-600"> *</span>}</span><input required={required} value={value} onChange={(event) => onChange(event.target.value)} className="min-h-12 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-500/15" /></label>;
+function TextInput({ label, value, onChange, required = false, type = 'text', min, max, step }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; type?: string; min?: number; max?: number; step?: number | string }) {
+  const numericField = label === 'Genome size' || label === 'GC content';
+  const resolvedType = numericField ? 'number' : type;
+  return <label className="block"><span className="mb-2 block text-xs font-black text-slate-600">{label}{required && <span className="text-red-600"> *</span>}</span><input required={required} type={resolvedType} min={min ?? (label === 'Genome size' ? 1 : label === 'GC content' ? 0 : undefined)} max={max ?? (label === 'GC content' ? 100 : undefined)} step={step ?? (label === 'GC content' ? '0.01' : numericField ? 1 : undefined)} value={value} onChange={(event) => onChange(event.target.value)} className="min-h-12 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-500/15" /></label>;
 }
 
 function TextArea({ label, value, onChange, rows = 4, mono = false }: { label: string; value: string; onChange: (value: string) => void; rows?: number; mono?: boolean }) {

@@ -215,8 +215,8 @@ export default function AdminUploadsPage() {
                   <Field label="Latitude" value={form.latitude} onChange={(value) => setForm({ ...form, latitude: value })} />
                   <Field label="Longitude" value={form.longitude} onChange={(value) => setForm({ ...form, longitude: value })} />
                   <Field label="Assembly Accession" value={form.assemblyAccession} onChange={(value) => setForm({ ...form, assemblyAccession: value })} />
-                  <Field label="Genome Size" value={form.genomeSize} onChange={(value) => setForm({ ...form, genomeSize: value })} />
-                  <Field label="GC Content" value={form.gcContent} onChange={(value) => setForm({ ...form, gcContent: value })} />
+                  <Field label="Genome Size (bp)" value={form.genomeSize} onChange={(value) => setForm({ ...form, genomeSize: value })} type="number" min={1} step={1} />
+                  <Field label="GC Content (%)" value={form.gcContent} onChange={(value) => setForm({ ...form, gcContent: value })} type="number" min={0} max={100} step="0.01" />
                 </div>
                 <Area label="Description" value={form.description} onChange={(value) => setForm({ ...form, description: value })} />
                 <Area label="Metadata JSON" value={form.metadata} onChange={(value) => setForm({ ...form, metadata: value })} rows={6} />
@@ -256,11 +256,11 @@ function StatusBadge({ status }: { status: ReviewStatus }) {
   return <span className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-widest ${classes[status]}`}>{status}</span>;
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function Field({ label, value, onChange, type = 'text', min, max, step }: { label: string; value: string; onChange: (value: string) => void; type?: string; min?: number; max?: number; step?: number | string }) {
   return (
     <label className="block">
       <span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-orange-500 focus:bg-white" />
+      <input type={type} min={min} max={max} step={step} value={value} onChange={(event) => onChange(event.target.value)} className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold outline-none focus:border-orange-500 focus:bg-white" />
     </label>
   );
 }

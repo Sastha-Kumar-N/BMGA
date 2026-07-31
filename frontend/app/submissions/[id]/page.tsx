@@ -332,8 +332,8 @@ export default function UserSubmissionDetailPage() {
                   <EditField label="Location Text" value={draft.locationText} onChange={(value) => setDraft({ ...draft, locationText: value })} />
                   <EditField label="Latitude" value={draft.latitude} onChange={(value) => setDraft({ ...draft, latitude: value })} />
                   <EditField label="Longitude" value={draft.longitude} onChange={(value) => setDraft({ ...draft, longitude: value })} />
-                  <EditField label="Genome Size" value={draft.genomeSize} onChange={(value) => setDraft({ ...draft, genomeSize: value })} />
-                  <EditField label="GC Content" value={draft.gcContent} onChange={(value) => setDraft({ ...draft, gcContent: value })} />
+                  <EditField label="Genome Size (bp)" type="number" min={1} step={1} value={draft.genomeSize} onChange={(value) => setDraft({ ...draft, genomeSize: value })} />
+                  <EditField label="GC Content (%)" type="number" min={0} max={100} step="0.01" value={draft.gcContent} onChange={(value) => setDraft({ ...draft, gcContent: value })} />
                   <EditField label="Genome Status" value={draft.genomeStatus} onChange={(value) => setDraft({ ...draft, genomeStatus: value })} />
                   <EditField label="BioSample Accession" value={draft.biosampleAccession} onChange={(value) => setDraft({ ...draft, biosampleAccession: value })} />
                   <EditField label="BioProject Accession" value={draft.bioprojectAccession} onChange={(value) => setDraft({ ...draft, bioprojectAccession: value })} />
@@ -637,12 +637,15 @@ function draftToPayload(draft: SubmissionDraft) {
   };
 }
 
-function EditField({ label, value, onChange, type = 'text', required = false }: {
+function EditField({ label, value, onChange, type = 'text', required = false, min, max, step }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   required?: boolean;
+  min?: number;
+  max?: number;
+  step?: number | string;
 }) {
   return (
     <label className="block">
@@ -650,6 +653,9 @@ function EditField({ label, value, onChange, type = 'text', required = false }: 
       <input
         required={required}
         type={type}
+        min={min}
+        max={max}
+        step={step}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="h-11 w-full rounded-xl border border-orange-100 bg-white px-4 text-sm font-bold outline-none transition focus:border-orange-500 focus:bg-white"

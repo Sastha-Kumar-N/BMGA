@@ -237,8 +237,8 @@ export default function AdminUploadDetailPage() {
                   <Info label="Coordinates" value={upload.latitude !== null && upload.latitude !== undefined && upload.longitude !== null && upload.longitude !== undefined ? `${upload.latitude}, ${upload.longitude}` : 'Not provided'} />
                   <Info label="Host" value={upload.host || 'Not provided'} />
                   <Info label="Assembly" value={upload.assemblyAccession || 'Not provided'} />
-                  <Info label="Genome Size" value={upload.genomeSize ? upload.genomeSize.toLocaleString() : 'Not provided'} />
-                  <Info label="GC Content" value={upload.gcContent ? `${upload.gcContent}` : 'Not provided'} />
+                  <Info label="Genome Size" value={upload.genomeSize !== null && upload.genomeSize !== undefined ? upload.genomeSize.toLocaleString() : 'Not provided'} />
+                  <Info label="GC Content" value={upload.gcContent !== null && upload.gcContent !== undefined ? `${upload.gcContent}%` : 'Not provided'} />
                   <Info label="Taxonomy ID" value={upload.taxonomyId ? String(upload.taxonomyId) : 'Not provided'} />
                   <Info label="Submission Type" value={upload.submissionType || 'Organism Upload'} />
                   <Info label="Submission Title" value={upload.title || `${upload.scientificName} / ${upload.strainName}`} />

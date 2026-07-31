@@ -1478,16 +1478,22 @@ model ToolResultTable {
 }
 
 model ToolOutputFile {
-  id          Int      @id @default(autoincrement())
-  toolRunId   Int
-  fileName    String
-  fileType    String?
-  filePath    String
-  description String?
-  createdAt   DateTime @default(now())
+  id                 Int       @id @default(autoincrement())
+  toolRunId          Int
+  fileName           String
+  fileType           String?
+  filePath           String
+  description        String?
+  fileSizeBytes      Int?
+  checksumSha256     String?
+  integrityStatus    String    @default("PENDING")
+  integrityCheckedAt DateTime?
+  integrityError     String?
+  createdAt          DateTime  @default(now())
 
   toolRun ToolRun @relation(fields: [toolRunId], references: [id], onDelete: Cascade)
 
   @@index([toolRunId])
   @@index([fileType])
+  @@index([integrityStatus])
 }

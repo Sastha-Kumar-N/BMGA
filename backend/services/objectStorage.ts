@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { normalizeToolName } from './resultsParsers/toolDefinitions';
@@ -32,15 +32,25 @@ export function configuredStorageDriver() {
   return storageDriver;
 }
 
+/** Create the local layout up front so every result type has a stable destination. */
+export function ensureStorageFolders() {
+  if (storageDriver !== 'local') return;
+
+  for (const directory of ['maya-results', 'submission-results', 'genome-references', 'profile-photos']) {
+    mkdirSync(path.resolve(localUploadRoot, directory), { recursive: true });
+  }
+}
+
 export async function saveUploadedResultFile(options: {
   organismId: number;
   toolName: string;
   fileName: string;
   fileContent: string;
 }) {
-  return storageDriver === 's3'
+  const storagePath = storageDriver === 's3'
     ? saveUploadedResultFileToS3(options)
     : saveUploadedResultFileToDisk(options);
+  return verifyWrittenTextFile(await storagePath, options.fileContent);
 }
 
 export async function saveSubmissionResultFile(options: {
@@ -49,9 +59,10 @@ export async function saveSubmissionResultFile(options: {
   fileName: string;
   fileContent: string;
 }) {
-  return storageDriver === 's3'
+  const storagePath = storageDriver === 's3'
     ? saveSubmissionResultFileToS3(options)
     : saveSubmissionResultFileToDisk(options);
+  return verifyWrittenTextFile(await storagePath, options.fileContent);
 }
 
 export async function saveGenomeReferenceFile(options: {
@@ -61,9 +72,10 @@ export async function saveGenomeReferenceFile(options: {
   fileName: string;
   fileContent: string;
 }) {
-  return storageDriver === 's3'
+  const storagePath = storageDriver === 's3'
     ? saveGenomeReferenceFileToS3(options)
     : saveGenomeReferenceFileToDisk(options);
+  return verifyWrittenTextFile(await storagePath, options.fileContent);
 }
 
 export async function saveProfilePhotoFile(options: {
@@ -105,6 +117,31 @@ export async function readStoredTextFile(filePath: string, maxBytes: number) {
     throw new Error('Stored file is larger than the configured import limit.');
   }
   return content;
+}
+
+export async function verifyStoredTextFileIntegrity(filePath: string, expected: {
+  checksumSha256: string;
+  fileSizeBytes: number;
+  maxBytes: number;
+}) {
+  if (!Number.isInteger(expected.fileSizeBytes) || expected.fileSizeBytes < 0 || !/^[a-f0-9]{64}$/i.test(expected.checksumSha256)) {
+    return { ok: false, reason: 'Invalid expected file integrity metadata' } as const;
+  }
+
+  try {
+    const content = await readStoredTextFile(filePath, expected.maxBytes);
+    const actualSize = Buffer.byteLength(content, 'utf8');
+    const actualChecksum = createHash('sha256').update(content, 'utf8').digest('hex');
+    if (actualSize !== expected.fileSizeBytes) {
+      return { ok: false, reason: 'Stored file size does not match', actualSize, actualChecksum } as const;
+    }
+    if (actualChecksum !== expected.checksumSha256) {
+      return { ok: false, reason: 'Stored file checksum does not match', actualSize, actualChecksum } as const;
+    }
+    return { ok: true, actualSize, actualChecksum } as const;
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : 'Stored file could not be read' } as const;
+  }
 }
 
 export async function sendStoredFileDownload(res: Response, filePath: string, fileName: string) {
@@ -233,6 +270,19 @@ function saveUploadedResultFileToDisk(options: {
   const outputPath = path.join(uploadDir, `${Date.now()}-${safeFile}`);
   writeFileSync(outputPath, options.fileContent, 'utf8');
   return outputPath;
+}
+
+async function verifyWrittenTextFile(storagePath: string, fileContent: string) {
+  const expected = {
+    checksumSha256: createHash('sha256').update(fileContent, 'utf8').digest('hex'),
+    fileSizeBytes: Buffer.byteLength(fileContent, 'utf8'),
+    maxBytes: Math.max(Buffer.byteLength(fileContent, 'utf8'), 1),
+  };
+  const verification = await verifyStoredTextFileIntegrity(storagePath, expected);
+  if (verification.ok) return storagePath;
+
+  await deleteStoredFiles([storagePath]);
+  throw new Error(`Stored file integrity verification failed: ${verification.reason}`);
 }
 
 async function saveUploadedResultFileToS3(options: {
